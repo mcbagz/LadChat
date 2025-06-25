@@ -1,0 +1,20 @@
+fastapi==0.115.13
+uvicorn==0.34.3
+sqlalchemy==2.0.41
+pydantic==2.11.7
+python-multipart==0.0.20
+
+# Additional dependencies that will be needed in later phases
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-decouple==3.8
+
+# Phase 3 additions
+aiofiles==24.1.0  # Async file operations
+Pillow==10.4.0  # Image processing (optional for validation)
+
+# For future phases
+# boto3==1.35.0  # AWS S3 integration
+# stripe==10.9.0  # Payment processing
+# transformers==4.45.0  # AI/ML for friend matching
+# torch==2.5.0  # PyTorch for AI models 
