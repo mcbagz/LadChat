@@ -1,2 +1,0 @@
-# LadChat
-Social Media App
