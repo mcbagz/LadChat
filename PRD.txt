@@ -1,0 +1,290 @@
+LadChat Product Requirements Document (PRD)
+Version: 1.0
+Date: June 23, 2025
+Author: Matt
+Purpose: To provide developers with detailed requirements for building LadChat, a mobile app for young men (18-35) to foster authentic, in-person friendships through ephemeral sharing and hangout planning.
+1. Overview
+1.1 Problem Statement
+Young men (18-35) face challenges forming and maintaining meaningful friendships due to the performative nature of existing social apps (e.g., SnapChat, Instagram), which prioritize shallow interactions and extensive data tracking. Social isolation is a growing issue, linked to mental health challenges. LadChat addresses this by offering a platform for low-stakes, ephemeral content sharing and real-world connection, emphasizing privacy and community.
+
+1.2 Solution
+LadChat is a mobile-first (iOS, Android) app that enables young men to share ephemeral stories/snaps, plan in-person hangouts, and connect with like-minded friends via AI-driven recommendations. It fosters authentic, platonic friendships through a “lad” vibe (fun, laid-back, community-focused) while minimizing data storage for privacy.
+
+1.3 Target Audience
+- Primary: Men aged 18-35 seeking casual, authentic friendships.
+- Secondary: Inclusive to all genders who align with the “lad” vibe.
+- User Needs:
+  - Low-pressure sharing (ephemeral content).
+  - Easy ways to plan and join hangouts.
+  - Trustworthy friend-matching based on shared interests and proximity.
+  - Privacy control over data and interactions.
+
+1.4 Success Metrics
+- Primary KPIs:
+  - Number of hangouts created and attended per user per month.
+  - Friend connections made via AI recommendations.
+  - Retention rate (DAU/MAU ratio).
+- Secondary KPIs:
+  - Stories/snaps shared per user per week.
+  - Group chats created and active.
+  - Venue directory engagement (views, visits).
+
+1.5 Non-Goals
+To prevent scope creep, LadChat will not:
+- Be a general-purpose social network (e.g., Instagram, TikTok).
+- Rely on extensive data tracking for ads.
+- Offer permanent chat history or story archives.
+- Function as a dating app.
+- Require heavy server-side storage.
+
+2. Features and Requirements
+2.1 Core Features
+2.1.1 Ephemeral Content (Stories and Snaps)
+- Description: Users can share photos/videos as stories (visible to selected circles for 24 hours) or snaps (sent to individuals/circles with user-defined timers). Content auto-deletes to encourage authenticity.
+- Requirements:
+  - Frontend:
+    - Camera-first UI (React Native, CameraX for Android, AVFoundation for iOS).
+    - Filters (basic: B&W, sepia; premium: sponsored or themed, e.g., “LadFest”).
+    - Story creation: Add text overlays, stickers, or doodles; set visibility (public, circle, private).
+    - Snap creation: Send to 1+ users or circles; set timer (1-60 seconds or 24 hours).
+    - View stories/snaps in a vertical swipe feed; display view counts (anonymous unless mutual friends).
+    - Screenshot alerts for snaps (notify sender without identifying viewer).
+  - Backend (FastAPI, SQLite, AWS S3):
+    - API endpoints:
+      - /story/upload: Validate media (Pydantic), store metadata (SQLite), upload to S3 with pre-signed URLs.
+      - /snap/send: Handle direct/circle snaps, store metadata, push notifications.
+      - /content/delete: Auto-delete expired content (cron job or SQLite trigger).
+      - Temporary media storage on S3 (delete after timer expires).
+      - SQLite tables: Stories (ID, sender, circle IDs, timestamp, timer), Snaps (ID, sender, recipient IDs, timer).
+  - Security:
+    - End-to-end encryption for snaps (Signal Protocol).
+    - JWT authentication for uploads/views.
+    - Rate-limit uploads to prevent spam (e.g., 50 stories/day).
+  - Metrics:
+    - Stories/snaps posted per user.
+    - View-to-post ratio.
+    - Screenshot frequency.
+
+2.1.2 AI-Powered Friend-Matching
+- Description: A RAG-based system recommends new friends based on interests, proximity, and mutual connections, fostering real-world connections.
+- Requirements:
+- Frontend:
+  - “Find Friends” tab with opt-in toggle (“Open to Friends”).
+  - Display recommended friends with profile previews (username, mutual friends, top 3 interests).
+  - Icebreaker prompts (e.g., “You both love hiking—suggest a trail meetup”).
+  - Accept/decline friend requests with one-tap actions.
+- Backend (FastAPI, SQLite, Hugging Face Transformers):
+  - API endpoint: /recommend/friends
+    - Input: User ID, location radius (GeoHash), interests.
+    - Process: RAG model (BERT embeddings) retrieves anonymized user profiles from SQLite, ranks by similarity.
+    - Output: List of user IDs, mutual connections, icebreaker text.
+  - SQLite table: Users (ID, username, interests [JSON], location radius, open_to_friends).
+  - On-device inference (TensorFlow Lite/Core ML) for privacy where possible.
+  - Update embeddings weekly (background task) based on user activity (e.g., hangouts, group chats).
+- Security:
+  - Anonymize data for RAG processing (e.g., hash user IDs).
+  - User consent required for location/interests sharing.
+  - Rate-limit recommendations (e.g., 10/day).
+- Metrics:
+  - Friend requests sent/accepted.
+  - Hangouts planned with recommended friends.
+  - User opt-in rate for friend-matching.
+
+2.1.3 Group Chat Identity Matching
+- Description: RAG-based recommendations add users to group chats or suggest events based on group interests (e.g., “Your group loves craft beer—join this brewery tour”).
+- Requirements:
+- Frontend:
+  - Group chat UI with member list, admin controls, and pinned events.
+  - “Group Vibe” profile (auto-generated summary of interests, e.g., “Soccer, BBQ, Gaming”).
+  - Suggested members/events in chat (e.g., “Add Jake—he’s into soccer” or “Check out this pub crawl”).
+  - One-tap invite/decline for suggested members.
+- Backend:
+  - API endpoints:
+    - /group/recommend/users: RAG model analyzes group chat metadata (SQLite), suggests users.
+    - /group/recommend/events: Suggests events/venues based on group interests.
+  - SQLite table: GroupChats (ID, members, admin, profile_embeddings [JSON]).
+  - RAG process: Generate group embeddings from member interests, chat keywords (anonymized), and past events.
+  - Push notifications for suggestions (WebSockets).
+- Security:
+  - Admin approval required for new members.
+  - Anonymize chat data for RAG (e.g., keyword extraction only).
+  - Moderation: AI flagging for inappropriate content + human review option.
+- Metrics:
+  - Group chats created/active.
+  - Members added via recommendations.
+  - Events planned from group suggestions.
+
+2.1.4 Hangout Planning
+- Description: Users can pin real-time or scheduled hangouts (e.g., “Bonfire at my place, 8 PM”) with location, media, and RSVP options.
+- Requirements:
+  - Frontend:
+    - “Hangouts” tab with map view (Mapbox SDK) and list view.
+    - Create hangout: Set title, description, location (GeoHash), visibility (public, circle, private), media (photo/video), RSVP deadline.
+    - RSVP options: Yes/Maybe/No; comment section for public hangouts.
+    - Real-time notifications for nearby hangouts (push or in-app).
+    - Countdown timer for event start.
+  - Backend:
+    - API endpoints:
+      - /hangout/pin: Create hangout, store metadata, upload media to S3.
+      - /hangout/nearby: Query SQLite for hangouts within user’s radius (GeoHash).
+      - /hangout/rsvp: Update RSVP status, notify creator.
+    - SQLite table: Hangouts (ID, creator, location, visibility, RSVP_list, timestamp).
+    - GeoHash for coarse location matching (5km precision).
+    - Auto-delete expired hangouts (cron job).
+  - Security:
+    - Location obfuscation for public hangouts (e.g., show “Downtown” not exact address).
+    - Report/block users for inappropriate hangouts.
+    - Encrypt location data in SQLite (AWS KMS).
+  - Metrics:
+    - Hangouts created/attended.
+    - RSVP conversion rate.
+    - Public vs. private hangout ratio.
+
+2.1.5 Third Space Directory
+- Description: A curated list of “lad-friendly” venues (bars, parks, gyms) for hangouts, with potential sponsorships.
+- Requirements:
+  - Frontend:
+    - “Venues” tab with filterable list (e.g., by type, distance, rating).
+    - Venue details: Name, address, photos, user reviews, sponsored badges.
+    - One-tap “Plan Hangout” from venue page.
+    - Sponsored filters (e.g., “Show bars with happy hour deals”).
+  - Backend:
+    - API endpoint: /venues/list
+    - Query SQLite for venues; integrate Mapbox API for geocoding.
+    - Return sorted list (distance, rating, sponsored status).
+    - SQLite table: Venues (ID, name, location, type, rating, sponsored).
+    - Manual curation initially; allow user-submitted venues with moderation.
+  - Monetization:
+    - Sponsored venue badges via Stripe Connect.
+    - Boosted venue listings (e.g., top of list for $).
+  - Security:
+    - Moderate user-submitted venues/reviews.
+    - Verify sponsored venues (manual review).
+  - Metrics:
+    - Venue page views.
+    - Hangouts planned at listed venues.
+    - Sponsored venue engagement.
+
+2.2 Additional Features
+2.2.1 User Profiles
+- Description: Minimal profiles to support ephemerality and privacy.
+- Requirements:
+  - Fields: Username, optional bio (100 chars), top 3 interests (predefined tags, e.g., “Soccer,” “Gaming”), profile photo.
+  - Visibility: Public (username, interests) or private (friends only).
+  - Edit profile via settings.
+  - SQLite table: Users (ID, username, bio, interests, photo_url).
+  - Metrics: Profile completion rate, interest tag distribution.
+
+2.2.2 Notifications
+- Description: Real-time alerts for snaps, hangouts, friend requests, and group suggestions.
+- Requirements:
+  - Push notifications (Firebase Cloud Messaging).
+  - In-app notification feed.
+  - User controls: Toggle types (e.g., disable public hangout alerts).
+  - WebSocket endpoint: /notifications/stream.
+  - Metrics: Notification open rate, opt-out rate.
+
+2.2.3 Privacy Controls
+- Description: Granular control over data sharing and visibility.
+- Requirements:
+  - Visibility settings: Stories/snaps (public, circle, private), location (off, friends, precise/coarse).
+  - Data deletion: One-tap account deletion (GDPR/CCPA compliant).
+  - Consent prompts for AI matching and location use.
+  - Metrics: Privacy setting changes, account deletions.
+
+2.3 Technical Requirements
+2.3.1 Frontend
+- Framework: React Native (cross-platform), Expo for builds.
+- Libraries:
+  - Camera: CameraX (Android), AVFoundation (iOS).
+  - Media: FFmpeg for processing.
+  - Maps: Mapbox SDK.
+- UI/UX:
+  - Camera-first home screen.
+  - Minimalist design (dark/light themes).
+  - Fast load times (<1s for story feed).
+- Accessibility: WCAG 2.1 compliance (e.g., screen reader support).
+
+2.3.2 Backend
+- Framework: FastAPI (Python, async).
+- Endpoints (key examples):
+  - /auth: Register, login, JWT refresh tokens.
+  - /story/upload, /snap/send, /hangout/pin, /recommend/friends, /venues/list (as above).
+- Database: SQLite (file-based).
+  - Schema: Users, Stories, Snaps, Hangouts, GroupChats, Groups, Venues.
+- Triggers: Auto-delete expired records.
+- Storage: AWS S3 for temporary media (24-hour TTL).
+- Tasks: Celery for background tasks (e.g., cleanup, RAG updates).
+- APIs: Mapbox/Google Maps for geolocation, Stripe for payments.
+
+2.3.3 AI/ML
+- Framework: Hugging Face Transformers (RAG).
+- Model: BERT for interest embeddings; TensorFlow Lite for on-device inference.
+- Data: Anonymized user inputs (interests, location radius, group chat keywords).
+- Training: Pre-trained models; fine-tune with user feedback (e.g., accepted friend requests).
+- Privacy: On-device processing where feasible; anonymized server-side data.
+
+2.3.4 Security
+- Encryption: JWT for auth, Signal Protocol for snaps, AWS KMS for keys.
+- Auth: OAuth 2.0 for sign-in (email, Apple, Google).
+- Moderation: AI-based content flagging (e.g., hate speech) + human review queue.
+- Compliance: GDPR, CCPA (e.g., privacy labels, data deletion).
+
+3. User Flows
+Key Flows:
+- Post Story:
+  - Open app → Camera UI → Capture photo/video → Add filters/text → Select visibility (circle) → Post → View in feed.
+- Plan Hangout:
+  - Open “Hangouts” → “+” → Set title (“BBQ”), location, visibility → Add media → Pin → Receive RSVP responses.
+- Find Friend:
+  - Open “Find Friends” → Toggle “Open to Friends” → View recommendations → Send request with icebreaker → Accept connection.
+- Join Group Chat:
+  - Receive group suggestion → View group vibe → Join → See event suggestions → RSVP.
+
+4. Monetization
+- Sponsored Venues: Badges/boosted listings via Stripe Connect.
+- Premium Filters: $1.99 for themed packs (e.g., “Sports Night”).
+- Boosted Events: $3.99 to promote public hangouts.
+- Non-Intrusive: No banner ads, no data sale for ads.
+
+5. Constraints and Assumptions
+Constraints:
+- Budget: Lean MVP; prioritize free/open-source tools (e.g., SQLite, FastAPI).
+- Timeline: 6-8 months for MVP launch.
+- Team: Small dev team (frontend, backend, AI/ML); outsource design if needed.
+- Scalability: Support 10,000 users initially; scale S3/SQLite as needed.
+
+Assumptions:
+- Users have smartphones with cameras and GPS.
+- Target audience prefers ephemeral over permanent content.
+- Local businesses will sponsor venues.
+- RAG model achieves >80% recommendation accuracy with minimal data.
+
+6. Dependencies
+External APIs:
+- Mapbox/Google Maps (geolocation, venue data).
+- Stripe (payments).
+- Firebase (notifications).
+
+Libraries:
+- React Native, FastAPI, Hugging Face Transformers.
+- Signal Protocol, FFmpeg for video processing.
+
+Compliance:
+- App Store/Google Play privacy labels.
+- GDPR/CCPA for data handling.
+
+7. Success Criteria
+MVP Success:
+- Functional:
+  - Share/view/delete stories/snaps with circles.
+  - Plan/attend hangouts with RSVP.
+  - Receive 2-5 friend recommendations per week.
+  - Browse curated venue directory with curated venues.
+- User Feedback:
+  - 70% users report making 1+ friend in 3 months.
+  - 80% satisfaction with privacy controls.
+- Technical:
+  - <1s load time for story feed.
+  - 99.9% uptime for API endpoints.
+  - No major security incidents.
