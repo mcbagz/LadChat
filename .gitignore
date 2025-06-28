@@ -5,6 +5,7 @@
 *.sqlite3
 
 # Media files (uploaded content)
+server/chroma/
 server/media/
 */media/temp/
 */media/uploads/
@@ -63,6 +64,7 @@ venv.bak/
 .env.development.local
 .env.test.local
 .env.production.local
+server/.env
 
 # Node.js / React Native
 node_modules/

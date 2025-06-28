@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from database import SessionLocal
-from models import Story, Snap, Hangout, GroupChat, DirectMessage, GroupMessage
+from models import Story, Snap, Event, Hangout, GroupChat, DirectMessage, GroupMessage
 from utils.logging_config import log_database_operation
 
 logger = logging.getLogger(__name__)
@@ -120,19 +120,24 @@ class BackgroundTaskManager:
                 # TODO: Delete media files from storage
                 log_database_operation("expire", "snaps", snap.id)
             
-            # Clean up expired hangouts
-            expired_hangouts = db.query(Hangout).filter(
+            # Clean up expired events (hangouts)
+            expired_events = db.query(Event).filter(
                 and_(
-                    Hangout.expires_at <= current_time,
-                    Hangout.is_active == True
+                    Event.expires_at <= current_time,
+                    Event.is_active == True
                 )
             ).all()
             
-            hangout_count = 0
-            for hangout in expired_hangouts:
-                hangout.is_active = False
-                hangout_count += 1
-                log_database_operation("expire", "hangouts", hangout.id)
+            event_count = 0
+            for event in expired_events:
+                event.is_active = False
+                event_count += 1
+                log_database_operation("expire", "events", event.id)
+            
+            # Also update ongoing status for active events
+            ongoing_events = db.query(Event).filter(Event.is_active == True).all()
+            for event in ongoing_events:
+                event.update_ongoing_status()
             
             # Clean up expired direct messages
             expired_direct_messages = db.query(DirectMessage).filter(
@@ -166,7 +171,7 @@ class BackgroundTaskManager:
             
             db.commit()
             
-            logger.info(f"Cleanup completed: {story_count} stories, {snap_count} snaps, {hangout_count} hangouts, {dm_count} direct messages, {gm_count} group messages expired")
+            logger.info(f"Cleanup completed: {story_count} stories, {snap_count} snaps, {event_count} events, {dm_count} direct messages, {gm_count} group messages expired")
             
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
@@ -186,7 +191,7 @@ class BackgroundTaskManager:
             # Count active content
             active_stories = db.query(Story).filter(Story.is_active == True).count()
             active_snaps = db.query(Snap).filter(Snap.is_active == True).count()
-            active_hangouts = db.query(Hangout).filter(Hangout.is_active == True).count()
+            active_events = db.query(Event).filter(Event.is_active == True).count()
             active_groups = db.query(GroupChat).filter(GroupChat.is_active == True).count()
             active_direct_messages = db.query(DirectMessage).filter(DirectMessage.is_deleted == False).count()
             active_group_messages = db.query(GroupMessage).filter(GroupMessage.is_deleted == False).count()
@@ -200,8 +205,8 @@ class BackgroundTaskManager:
                 Snap.created_at >= last_hour
             ).count()
             
-            recent_hangouts = db.query(Hangout).filter(
-                Hangout.created_at >= last_hour
+            recent_events = db.query(Event).filter(
+                Event.created_at >= last_hour
             ).count()
             
             recent_direct_messages = db.query(DirectMessage).filter(
@@ -216,7 +221,7 @@ class BackgroundTaskManager:
                 "active_content": {
                     "stories": active_stories,
                     "snaps": active_snaps,
-                    "hangouts": active_hangouts,
+                    "events": active_events,
                     "groups": active_groups,
                     "direct_messages": active_direct_messages,
                     "group_messages": active_group_messages
@@ -224,7 +229,7 @@ class BackgroundTaskManager:
                 "recent_activity": {
                     "stories": recent_stories,
                     "snaps": recent_snaps,
-                    "hangouts": recent_hangouts,
+                    "events": recent_events,
                     "direct_messages": recent_direct_messages,
                     "group_messages": recent_group_messages
                 },
@@ -336,19 +341,19 @@ async def cleanup_old_data(days_old: int = 90):
         snap_count = old_snaps.count()
         old_snaps.delete(synchronize_session=False)
         
-        # Delete old hangouts
-        old_hangouts = db.query(Hangout).filter(
+        # Delete old events
+        old_events = db.query(Event).filter(
             and_(
-                Hangout.expires_at <= cutoff_time,
-                Hangout.is_active == False
+                Event.expires_at <= cutoff_time,
+                Event.is_active == False
             )
         )
-        hangout_count = old_hangouts.count()
-        old_hangouts.delete(synchronize_session=False)
+        event_count = old_events.count()
+        old_events.delete(synchronize_session=False)
         
         db.commit()
         
-        logger.info(f"Deleted old data: {story_count} stories, {snap_count} snaps, {hangout_count} hangouts")
+        logger.info(f"Deleted old data: {story_count} stories, {snap_count} snaps, {event_count} events")
         
     except Exception as e:
         logger.error(f"Error cleaning up old data: {e}", exc_info=True)

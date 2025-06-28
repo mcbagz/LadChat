@@ -1,16 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from datetime import timedelta
+import os
+import uuid
+from pathlib import Path
 
 from database import get_db
 from models.user import User
+from models.embeddings import UserEmbedding
 from schemas import (
     UserRegistration, UserLogin, TokenResponse, TokenRefresh,
     UserResponse, UserUpdate, PasswordChange, SuccessResponse
 )
 from auth import AuthManager, get_current_user
 from config import settings
+from ai.embedding_service import embedding_service
+from ai.chroma_client import chroma_client
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -53,6 +62,35 @@ async def register_user(user_data: UserRegistration, db: Session = Depends(get_d
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+        
+        # Create user embedding immediately for testing
+        try:
+            profile_embedding = await embedding_service.generate_user_profile_embedding(new_user)
+            if profile_embedding:
+                # Store in database
+                user_embedding = UserEmbedding(
+                    user_id=new_user.id,
+                    profile_embedding=profile_embedding,
+                    message_embedding=None  # Not using message embeddings for testing
+                )
+                db.add(user_embedding)
+                db.commit()
+                
+                # Store in ChromaDB with single embedding
+                chroma_client.add_user_embedding(
+                    new_user.id, 
+                    profile_embedding, 
+                    [],  # Empty message embedding for testing
+                    metadata={
+                        "username": new_user.username
+                    }
+                )
+                logger.info(f"Created embedding for new user {new_user.id}")
+            else:
+                logger.warning(f"Failed to create embedding for new user {new_user.id}")
+        except Exception as e:
+            logger.error(f"Error creating embedding for new user {new_user.id}: {e}")
+            # Don't fail registration if embedding creation fails
         
         # Create JWT tokens
         token_data = {"sub": str(new_user.id), "username": new_user.username}
@@ -181,12 +219,17 @@ async def update_user_profile(
     """
     Update current user's profile
     """
+    # Track if profile data changed to update embeddings
+    profile_changed = False
+    
     # Update only provided fields
     if update_data.bio is not None:
         current_user.bio = update_data.bio
+        profile_changed = True
     
     if update_data.interests is not None:
         current_user.interests = update_data.interests
+        profile_changed = True
     
     if update_data.open_to_friends is not None:
         current_user.open_to_friends = update_data.open_to_friends
@@ -194,12 +237,50 @@ async def update_user_profile(
     if update_data.location_radius is not None:
         current_user.location_radius = update_data.location_radius
     
+    if hasattr(update_data, 'profile_photo_url') and update_data.profile_photo_url is not None:
+        current_user.profile_photo_url = update_data.profile_photo_url
+    
     # Update timestamp
     from sqlalchemy import func
     current_user.updated_at = func.now()
     
     db.commit()
     db.refresh(current_user)
+    
+    # Update embeddings immediately if profile data changed
+    if profile_changed:
+        try:
+            profile_embedding = await embedding_service.generate_user_profile_embedding(current_user)
+            if profile_embedding:
+                # Update database
+                user_embedding = db.query(UserEmbedding).filter(UserEmbedding.user_id == current_user.id).first()
+                if user_embedding:
+                    user_embedding.profile_embedding = profile_embedding
+                    user_embedding.last_updated = func.now()
+                else:
+                    user_embedding = UserEmbedding(
+                        user_id=current_user.id,
+                        profile_embedding=profile_embedding,
+                        message_embedding=None
+                    )
+                    db.add(user_embedding)
+                db.commit()
+                
+                # Update ChromaDB
+                chroma_client.add_user_embedding(
+                    current_user.id,
+                    profile_embedding,
+                    [],  # Empty message embedding for testing
+                    metadata={
+                        "username": current_user.username
+                    }
+                )
+                logger.info(f"Updated embedding for user {current_user.id}")
+            else:
+                logger.warning(f"Failed to update embedding for user {current_user.id}")
+        except Exception as e:
+            logger.error(f"Error updating embedding for user {current_user.id}: {e}")
+            # Don't fail profile update if embedding update fails
     
     return UserResponse(
         id=current_user.id,
@@ -272,4 +353,75 @@ async def logout_user(current_user: User = Depends(get_current_user)):
     # 2. Store blacklisted tokens in Redis with expiration
     # For now, we'll just return success and let the client handle token removal
     
-    return SuccessResponse(message="Logged out successfully") 
+    return SuccessResponse(message="Logged out successfully")
+
+@router.post("/profile-picture")
+async def upload_profile_picture(
+    media_file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload profile picture for current user
+    """
+    # Validate file type
+    allowed_types = ['image/jpeg', 'image/jpg', 'image/png']
+    if media_file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only JPEG and PNG images are allowed"
+        )
+    
+    # Validate file size (max 5MB)
+    max_size = 5 * 1024 * 1024  # 5MB
+    media_file.file.seek(0, 2)  # Seek to end
+    file_size = media_file.file.tell()
+    media_file.file.seek(0)  # Seek back to beginning
+    
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size too large. Maximum 5MB allowed"
+        )
+    
+    try:
+        # Create media directory if it doesn't exist
+        media_dir = Path("media/profile_pictures")
+        media_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = Path(media_file.filename).suffix.lower()
+        if not file_extension:
+            file_extension = '.jpg'
+        
+        unique_filename = f"{current_user.id}_{uuid.uuid4().hex}{file_extension}"
+        file_path = media_dir / unique_filename
+        
+        # Save file
+        with open(file_path, "wb") as buffer:
+            content = await media_file.read()
+            buffer.write(content)
+        
+        # Update user's profile photo URL
+        profile_photo_url = f"/media/profile_pictures/{unique_filename}"
+        current_user.profile_photo_url = profile_photo_url
+        
+        # Update timestamp
+        from sqlalchemy import func
+        current_user.updated_at = func.now()
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        return {
+            "success": True,
+            "message": "Profile picture uploaded successfully",
+            "profile_photo_url": profile_photo_url
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload profile picture: {str(e)}"
+        ) 

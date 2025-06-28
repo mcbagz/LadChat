@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   StyleSheet, 
   ScrollView, 
@@ -10,25 +10,31 @@ import {
   TextInput,
   Modal 
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
+import { LadColors, Colors, getLadColor } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiClient, Conversation } from '@/services/api';
+import { apiClient, Conversation, GroupChat, FriendRecommendation } from '@/services/api';
+import FriendProfileModal from '@/components/FriendProfileModal';
+import GroupCreationModal from '@/components/GroupCreationModal';
+import ProfilePicture from '@/components/ProfilePicture';
+import { LadCopy } from '@/utils/LadCopy';
 
-type TabType = 'messages' | 'discover' | 'requests';
+type TabType = 'chats' | 'discover' | 'requests';
 
 interface FriendRequest {
   id: number;
-  sender_id: number;
-  sender: {
+  requester: {
     id: number;
     username: string;
+    bio?: string;
     interests: string[];
     is_verified: boolean;
+    profile_photo_url?: string;
   };
   message?: string;
   created_at: string;
@@ -47,8 +53,10 @@ interface Friend {
   friend: {
     id: number;
     username: string;
+    bio?: string;
     interests: string[];
     is_verified: boolean;
+    profile_photo_url?: string;
   };
   created_at: string;
 }
@@ -56,24 +64,34 @@ interface Friend {
 export default function FriendsScreen() {
   const colorScheme = useColorScheme();
   const { user, updateProfile } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabType>('messages');
+  const [activeTab, setActiveTab] = useState<TabType>('chats');
   const [isOpenToFriends, setIsOpenToFriends] = useState(user?.open_to_friends || false);
   
-  // Messages tab state - Initialize as empty arrays
+  // Chats tab state - combining messages and groups
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [groups, setGroups] = useState<GroupChat[]>([]);
+  const [allChats, setAllChats] = useState<Conversation[]>([]);
   
-  // Discover tab state - Initialize as empty arrays
+  // Discover tab state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false); // Control when to show results
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [aiRecommendations, setAiRecommendations] = useState<FriendRecommendation[]>([]);
   
-  // Requests tab state - Initialize as empty arrays
+  // Requests tab state
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   
   // Loading states
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  
+  // Modal states
+  const [showFriendProfile, setShowFriendProfile] = useState(false);
+  const [selectedFriendId, setSelectedFriendId] = useState<number | null>(null);
+  const [showGroupCreation, setShowGroupCreation] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -86,9 +104,17 @@ export default function FriendsScreen() {
     }
   }, [user]);
 
+  // Combine and sort chats when conversations or groups change
+  useEffect(() => {
+    const combined = [...conversations];
+    setAllChats(combined.sort((a, b) => 
+      new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+    ));
+  }, [conversations, groups]);
+
   const loadData = async () => {
     switch (activeTab) {
-      case 'messages':
+      case 'chats':
         await loadConversations();
         break;
       case 'discover':
@@ -103,18 +129,118 @@ export default function FriendsScreen() {
   const loadConversations = async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.getConversations();
-      if (response.success && response.data) {
-        // Ensure data is always an array
-        const conversationsData = Array.isArray(response.data) ? response.data : [];
-        setConversations(conversationsData);
+      console.log('🔍 CONVERSATIONS DEBUG - Loading all conversations and groups...');
+      // Load direct conversations, group chats, and unread chat summary
+      const [conversationsResponse, groupsResponse, chatSummaryResponse] = await Promise.all([
+        apiClient.getConversations(),
+        apiClient.getUserGroups(),
+        apiClient.getChatSummary()
+      ]);
+      
+      console.log('📥 CONVERSATIONS DEBUG - Direct conversations response:', conversationsResponse);
+      console.log('📥 CONVERSATIONS DEBUG - Groups response:', groupsResponse);
+      console.log('📥 CONVERSATIONS DEBUG - Chat summary response:', chatSummaryResponse);
+      
+      let allConversations: any[] = [];
+      
+      // Process direct conversations
+      if (conversationsResponse.success && conversationsResponse.data) {
+        const conversationsData = Array.isArray(conversationsResponse.data) ? conversationsResponse.data : (conversationsResponse.data.data || []);
+        
+        const transformedConversations = conversationsData.map((conv: any) => {
+          const transformed = {
+            ...conv,
+            chat_type: 'direct',
+            chat_id: conv.id,
+            chat_name: conv.other_user?.username || 'Unknown User',
+            last_message_at: conv.updated_at || conv.last_message?.created_at || new Date().toISOString(),
+            last_message_preview: conv.last_message?.content || (conv.last_message?.message_type === 'media' ? '📷 Photo' : 'No messages yet'),
+            member_count: 2
+          };
+          
+          console.log(`📋 DIRECT CONVERSATION ${conv.id}:`, {
+            username: conv.other_user?.username,
+            chat_type: 'direct'
+          });
+          
+          return transformed;
+        });
+        
+        allConversations = [...transformedConversations];
+      }
+      
+      // Process group chats
+      if (groupsResponse.success && groupsResponse.data) {
+        const groupsData = groupsResponse.data.groups || groupsResponse.data.data || groupsResponse.data;
+        
+        if (Array.isArray(groupsData)) {
+          const transformedGroups = groupsData.map((group: any) => {
+            // Better handling of last message preview for groups
+            let lastMessagePreview = 'No messages yet';
+            if (group.last_message) {
+              if (group.last_message.content) {
+                lastMessagePreview = group.last_message.content;
+              } else if (group.last_message.message_type === 'media') {
+                lastMessagePreview = group.last_message.media_type === 'photo' ? '📷 Photo' : '🎥 Video';
+              }
+            } else if (group.last_message_preview) {
+              lastMessagePreview = group.last_message_preview;
+            }
+            
+            const transformed = {
+              ...group,
+              chat_type: 'group',
+              chat_id: group.id,
+              chat_name: group.name,
+              group_name: group.name,
+              last_message_at: group.last_message?.created_at || group.last_message_at || group.updated_at || new Date().toISOString(),
+              last_message_preview: lastMessagePreview,
+              other_user: null
+            };
+            
+            console.log(`📋 GROUP CONVERSATION ${group.id}:`, {
+              name: group.name,
+              chat_type: 'group',
+              member_count: group.member_count,
+              last_message_preview: lastMessagePreview
+            });
+            
+            return transformed;
+          });
+          
+          allConversations = [...allConversations, ...transformedGroups];
+        }
+      }
+      
+      console.log('📋 TOTAL CONVERSATIONS FOUND:', allConversations.length);
+      
+      // Merge unread counts from chat summary if available
+      if (chatSummaryResponse.success && chatSummaryResponse.data) {
+        const unreadData = Array.isArray(chatSummaryResponse.data) ? chatSummaryResponse.data : (chatSummaryResponse.data.data || []);
+        
+        const conversationsWithUnread = allConversations.map((conv: any) => {
+          const unreadConv = unreadData.find((u: any) => 
+            u.chat_type === conv.chat_type && u.chat_id === conv.chat_id
+          );
+          return {
+            ...conv,
+            unread_count: unreadConv?.unread_count || 0
+          };
+        });
+        
+        console.log('✅ CONVERSATIONS DEBUG - Final conversations with unread counts:', conversationsWithUnread);
+        setConversations(conversationsWithUnread);
       } else {
-        console.log('Failed to load conversations:', response.error);
-        setConversations([]); // Reset to empty array on error
+        const conversationsWithZeroUnread = allConversations.map((conv: any) => ({
+          ...conv,
+          unread_count: 0
+        }));
+        console.log('✅ CONVERSATIONS DEBUG - Final conversations (no unread info):', conversationsWithZeroUnread);
+        setConversations(conversationsWithZeroUnread);
       }
     } catch (error) {
-      console.error('Error loading conversations:', error);
-      setConversations([]); // Reset to empty array on error
+      console.error('❌ CONVERSATIONS DEBUG - Exception:', error);
+      setConversations([]);
     } finally {
       setIsLoading(false);
     }
@@ -127,19 +253,17 @@ export default function FriendsScreen() {
       console.log('📥 FRIENDS LIST DEBUG - Raw API response:', response);
       
       if (response.success && response.data) {
-        // Fix double nesting: response.data.data contains the actual friends array
         const actualData = response.data.data || response.data;
         const friendsData = Array.isArray(actualData) ? actualData : [];
         console.log('✅ FRIENDS LIST DEBUG - Processed friends data:', friendsData);
-        console.log('✅ FRIENDS LIST DEBUG - Setting friends count:', friendsData.length);
         setFriends(friendsData);
       } else {
         console.log('❌ FRIENDS LIST DEBUG - Failed to load. Success:', response.success, 'Data:', response.data, 'Error:', response.error);
-        setFriends([]); // Reset to empty array on error
+        setFriends([]);
       }
     } catch (error) {
       console.error('❌ FRIENDS LIST DEBUG - Exception:', error);
-      setFriends([]); // Reset to empty array on error
+      setFriends([]);
     } finally {
       setIsLoading(false);
     }
@@ -152,19 +276,17 @@ export default function FriendsScreen() {
       console.log('📥 FRIEND REQUESTS DEBUG - Raw API response:', response);
       
       if (response.success && response.data) {
-        // Fix double nesting: response.data.data contains the actual requests array
         const actualData = response.data.data || response.data;
         const requestsData = Array.isArray(actualData) ? actualData : [];
         console.log('✅ FRIEND REQUESTS DEBUG - Processed requests data:', requestsData);
-        console.log('✅ FRIEND REQUESTS DEBUG - Setting requests count:', requestsData.length);
         setFriendRequests(requestsData);
       } else {
         console.log('❌ FRIEND REQUESTS DEBUG - Failed to load. Success:', response.success, 'Data:', response.data, 'Error:', response.error);
-        setFriendRequests([]); // Reset to empty array on error
+        setFriendRequests([]);
       }
     } catch (error) {
       console.error('❌ FRIEND REQUESTS DEBUG - Exception:', error);
-      setFriendRequests([]); // Reset to empty array on error
+      setFriendRequests([]);
     } finally {
       setIsLoading(false);
     }
@@ -173,32 +295,54 @@ export default function FriendsScreen() {
   const searchUsers = async (query: string) => {
     if (query.length < 2) {
       setSearchResults([]);
+      setShowSearchResults(false);
       return;
     }
 
     console.log('🔍 FRONTEND SEARCH DEBUG - Starting search for:', query);
     setIsSearching(true);
+    setShowSearchResults(true); // Show results when search is performed
     try {
       const response = await apiClient.searchUsers(query, 20);
       console.log('📥 FRONTEND SEARCH DEBUG - Raw API response:', response);
       
       if (response.success && response.data) {
-        // Fix double nesting: response.data.data contains the actual user array
         const actualData = response.data.data || response.data;
         const searchData = Array.isArray(actualData) ? actualData : [];
         console.log('✅ FRONTEND SEARCH DEBUG - Processed search data:', searchData);
-        console.log('✅ FRONTEND SEARCH DEBUG - Setting search results count:', searchData.length);
         setSearchResults(searchData);
       } else {
         console.log('❌ FRONTEND SEARCH DEBUG - Search failed. Success:', response.success, 'Data:', response.data, 'Error:', response.error);
-        setSearchResults([]); // Reset to empty array on error
+        setSearchResults([]);
       }
     } catch (error) {
       console.error('❌ FRONTEND SEARCH DEBUG - Exception during search:', error);
-      setSearchResults([]); // Reset to empty array on error
+      setSearchResults([]);
     } finally {
       setIsSearching(false);
-      console.log('🏁 FRONTEND SEARCH DEBUG - Search completed. Final searchResults state will be updated.');
+    }
+  };
+
+  const getAIFriendRecommendations = async () => {
+    setIsLoadingAI(true);
+    try {
+      console.log('🤖 AI RECOMMENDATIONS - Loading friend recommendations...');
+      const response = await apiClient.getFriendRecommendations(10);
+      
+      if (response.success && response.data) {
+        // Handle direct array response from the API
+        const recommendationsData = Array.isArray(response.data) ? response.data : [];
+        console.log('✅ AI RECOMMENDATIONS - Got recommendations:', recommendationsData);
+        setAiRecommendations(recommendationsData);
+      } else {
+        console.log('❌ AI RECOMMENDATIONS - Failed to load:', response.error);
+        setAiRecommendations([]);
+      }
+    } catch (error) {
+      console.error('❌ AI RECOMMENDATIONS - Exception:', error);
+      setAiRecommendations([]);
+    } finally {
+      setIsLoadingAI(false);
     }
   };
 
@@ -206,13 +350,10 @@ export default function FriendsScreen() {
     try {
       const response = await apiClient.sendFriendRequest(userId, `Hey ${username}, let's be friends!`);
       if (response.success) {
-        Alert.alert('Success', `Friend request sent to ${username}`);
-        // Refresh search results to update status
-        if (searchQuery.length >= 2) {
-          await searchUsers(searchQuery);
-        }
+        Alert.alert(LadCopy.QUICK.SUCCESS, LadCopy.FRIENDS.FRIEND_REQUEST_SENT());
+        // Don't auto-refresh search - let user manually search if needed
       } else {
-        Alert.alert('Error', response.error || 'Failed to send friend request');
+        Alert.alert(LadCopy.QUICK.ERROR, response.error || 'Failed to send friend request');
       }
     } catch (error) {
       console.error('Error sending friend request:', error);
@@ -225,9 +366,9 @@ export default function FriendsScreen() {
       const response = await apiClient.respondToFriendRequest(requestId, action);
       if (response.success) {
         Alert.alert(
-          'Success', 
+          LadCopy.QUICK.SUCCESS, 
           action === 'accept' 
-            ? `You are now friends with ${username}!` 
+            ? LadCopy.FRIENDS.NEW_FRIEND(username)
             : `Friend request from ${username} declined`
         );
         await loadFriendRequests();
@@ -243,8 +384,64 @@ export default function FriendsScreen() {
     }
   };
 
-  const openConversation = (userId: number, username: string) => {
-    // Navigate to chat screen
+  const openConversation = async (conversation: any) => {
+    console.log('💬 OPENING CONVERSATION:', conversation);
+    
+    // Detect conversation type from actual data structure
+    const isDirectChat = !!conversation.other_user;
+    const chatType = isDirectChat ? 'direct' : 'group';
+    const chatId = conversation.chat_id || conversation.id;
+    
+    console.log('🔍 CONVERSATION ANALYSIS:', {
+      isDirectChat,
+      chatType,
+      chatId,
+      hasOtherUser: !!conversation.other_user,
+      otherUserName: conversation.other_user?.username,
+      groupName: conversation.group_name || conversation.chat_name || conversation.name
+    });
+    
+    try {
+      // Mark chat as opened to clear unread notifications
+      await apiClient.markChatAsOpened(chatType, chatId);
+      console.log('✅ Marked chat as opened successfully');
+    } catch (error) {
+      console.error('❌ Error marking chat as opened:', error);
+      // Continue with navigation even if marking as opened fails
+    }
+    
+    try {
+      if (isDirectChat && conversation.other_user) {
+        console.log('🚀 Navigating to direct chat with user:', conversation.other_user.username);
+        router.push({
+          pathname: '/chat' as any,
+          params: {
+            userId: conversation.other_user.id.toString(),
+            username: conversation.other_user.username,
+          },
+        });
+      } else if (!isDirectChat) {
+        const groupName = conversation.group_name || conversation.chat_name || conversation.name || `Group ${chatId}`;
+        console.log('🚀 Navigating to group chat:', groupName, 'with ID:', chatId);
+        router.push({
+          pathname: '/messages/chat' as any,
+          params: {
+            groupId: chatId.toString(),
+            groupName: groupName,
+            isGroup: 'true',
+          },
+        });
+      } else {
+        console.error('❌ Unable to determine conversation type:', conversation);
+        Alert.alert('Error', 'Unable to open this conversation');
+      }
+    } catch (error) {
+      console.error('❌ Error navigating to conversation:', error);
+      Alert.alert('Error', 'Failed to open conversation');
+    }
+  };
+
+  const openDirectConversation = (userId: number, username: string) => {
     router.push({
       pathname: '/chat' as any,
       params: {
@@ -252,6 +449,47 @@ export default function FriendsScreen() {
         username: username,
       },
     });
+  };
+
+  const viewFriendProfile = (friendId: number) => {
+    setSelectedFriendId(friendId);
+    setShowFriendProfile(true);
+  };
+
+  const handleRemoveFriend = async (friendId: number, username: string) => {
+    Alert.alert(
+      'Remove Friend',
+      `Are you sure you want to remove ${username} from your friends?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await apiClient.removeFriend(friendId);
+              if (response.success) {
+                Alert.alert('Success', `${username} has been removed from your friends`);
+                await loadFriends();
+              } else {
+                Alert.alert('Error', response.error || 'Failed to remove friend');
+              }
+            } catch (error) {
+              console.error('Error removing friend:', error);
+              Alert.alert('Error', 'Failed to remove friend');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleGroupCreated = async (group: GroupChat) => {
+    console.log('🎉 GROUP CREATED - Switching to chats tab and refreshing...');
+    setActiveTab('chats');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await loadConversations();
+    Alert.alert('Success', `Group "${group.name}" created successfully!`);
   };
 
   const onRefresh = async () => {
@@ -265,15 +503,12 @@ export default function FriendsScreen() {
     try {
       const success = await updateProfile({ open_to_friends: value });
       if (success) {
-        // Success - the user context and state are already updated
         console.log('Successfully updated open_to_friends to', value);
       } else {
-        // Revert the toggle if the API call failed
         setIsOpenToFriends(!value);
         Alert.alert('Error', 'Failed to update setting. Please try again.');
       }
     } catch (error) {
-      // Revert the toggle if there was an error
       setIsOpenToFriends(!value);
       console.error('Error updating open_to_friends:', error);
       Alert.alert('Error', 'Failed to update setting. Please try again.');
@@ -281,7 +516,12 @@ export default function FriendsScreen() {
   };
 
   const formatLastMessageTime = (timestamp: string): string => {
+    try {
     const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        return 'Recently';
+      }
+      
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -293,67 +533,98 @@ export default function FriendsScreen() {
     if (diffHours < 24) return `${diffHours}h`;
     if (diffDays < 7) return `${diffDays}d`;
     return date.toLocaleDateString();
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Recently';
+    }
   };
 
   const getLastMessagePreview = (conversation: Conversation): string => {
-    if (!conversation.last_message) return 'No messages yet';
-    
-    const message = conversation.last_message;
-    if (message.message_type === 'media') {
-      return message.media_type === 'photo' ? '📸 Photo' : '🎥 Video';
-    }
-    
-    return message.content || 'Message';
+    return conversation.last_message_preview || 'No messages yet';
   };
 
-  const renderMessagesTab = () => (
-    <View style={styles.tabContent}>
+  const renderChatsTab = () => (
+    <ScrollView 
+      style={styles.tabContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      {/* Create Group Button */}
+      <TouchableOpacity 
+        style={styles.createGroupButton}
+        onPress={() => setShowGroupCreation(true)}
+      >
+        <View style={styles.createGroupContent}>
+          <View style={styles.createGroupIcon}>
+            <IconSymbol name="plus" size={20} color="white" />
+          </View>
+          <View style={styles.createGroupText}>
+            <ThemedText style={styles.createGroupTitle}>Create New Group</ThemedText>
+            <ThemedText style={styles.createGroupSubtitle}>Start a group with your friends</ThemedText>
+          </View>
+        </View>
+      </TouchableOpacity>
+
       {isLoading ? (
         <ThemedView style={styles.loadingState}>
-          <ThemedText>Loading conversations...</ThemedText>
+          <ThemedText>{LadCopy.SYSTEM.LOADING()}</ThemedText>
         </ThemedView>
-      ) : !conversations || conversations.length === 0 ? (
+      ) : !allChats || allChats.length === 0 ? (
         <ThemedView style={styles.emptyState}>
           <IconSymbol 
             name="message.circle" 
             size={48} 
             color={Colors[colorScheme ?? 'light'].icon} 
           />
-          <ThemedText style={styles.emptyTitle}>No conversations yet</ThemedText>
+          <ThemedText style={styles.emptyTitle}>No chats yet</ThemedText>
           <ThemedText style={styles.emptyText}>
-            Add friends to start chatting!
+            Start chatting with friends or create a group!
           </ThemedText>
+          
+          <TouchableOpacity 
+            style={styles.findFriendsButton}
+            onPress={() => setActiveTab('discover')}
+          >
+            <IconSymbol name="sparkles" size={16} color="white" />
+            <ThemedText style={styles.findFriendsButtonText}>
+              Find Friends
+            </ThemedText>
+          </TouchableOpacity>
         </ThemedView>
       ) : (
         <View style={styles.conversationsList}>
-          {conversations?.map((conversation) => (
+          {allChats.map((conversation, index) => (
             <TouchableOpacity
-              key={conversation.id}
+              key={`${conversation.chat_type}-${conversation.chat_id}-${index}`}
               style={styles.conversationItem}
-              onPress={() => openConversation(conversation.other_user_id, conversation.other_user.username)}
+              onPress={() => openConversation(conversation)}
             >
               <View style={styles.avatarContainer}>
                 <View style={styles.avatar}>
                   <IconSymbol 
-                    name="person.crop.circle" 
+                    name={conversation.chat_type === 'group' ? "person.3.fill" : "person.crop.circle"} 
                     size={48} 
                     color={Colors[colorScheme ?? 'light'].icon} 
                   />
                 </View>
-                {conversation.other_user.is_verified && (
-                  <View style={styles.verifiedBadge}>
-                    <IconSymbol name="checkmark" size={12} color="white" />
-                  </View>
+                {conversation.chat_type === 'direct' && conversation.other_user?.profile_photo_url && (
+                  <ProfilePicture
+                    uri={conversation.other_user.profile_photo_url}
+                    size={48}
+                    style={styles.avatar}
+                  />
                 )}
               </View>
 
               <View style={styles.conversationInfo}>
                 <View style={styles.conversationHeader}>
                   <ThemedText style={styles.username}>
-                    {conversation.other_user.username}
+                    {conversation.chat_type === 'direct' 
+                      ? conversation.other_user?.username || 'Unknown User'
+                      : conversation.group_name || conversation.chat_name || `Group ${conversation.chat_id}`
+                    }
                   </ThemedText>
                   <ThemedText style={styles.timestamp}>
-                    {formatLastMessageTime(conversation.updated_at)}
+                    {formatLastMessageTime(conversation.last_message_at)}
                   </ThemedText>
                 </View>
                 
@@ -375,66 +646,67 @@ export default function FriendsScreen() {
                       </ThemedText>
                     </View>
                   )}
-                </View>
               </View>
 
-              {conversation.is_muted && (
-                <IconSymbol 
-                  name="speaker.slash" 
-                  size={16} 
-                  color={Colors[colorScheme ?? 'light'].icon} 
-                />
-              )}
+                {conversation.chat_type === 'group' && conversation.member_count && (
+                  <ThemedText style={styles.groupMemberCount}>
+                    {conversation.member_count} member{conversation.member_count !== 1 ? 's' : ''}
+                  </ThemedText>
+                )}
+              </View>
             </TouchableOpacity>
           ))}
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 
   const renderDiscoverTab = () => (
-    <View style={styles.tabContent}>
+    <ScrollView 
+      style={styles.tabContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <IconSymbol name="magnifyingglass" size={16} color={Colors[colorScheme ?? 'light'].icon} />
+          <IconSymbol name="magnifyingglass" size={16} color={getLadColor(colorScheme ?? 'light', 'text', 'tertiary')} />
           <TextInput
             style={[styles.searchInput, { color: Colors[colorScheme ?? 'light'].text }]}
             placeholder="Search for friends..."
-            placeholderTextColor={Colors[colorScheme ?? 'light'].text + '60'}
+            placeholderTextColor={getLadColor(colorScheme ?? 'light', 'text', 'tertiary')}
             value={searchQuery}
             onChangeText={(text) => {
               setSearchQuery(text);
-              searchUsers(text);
+              // Clear search results when query is too short or when typing
+              if (text.length < 2) {
+                setSearchResults([]);
+                setShowSearchResults(false);
+              } else {
+                setShowSearchResults(false); // Hide results until search button is clicked
+              }
             }}
+            onSubmitEditing={() => searchUsers(searchQuery)}
             autoCapitalize="none"
             autoCorrect={false}
           />
-          {isSearching && (
-            <IconSymbol name="arrow.2.circlepath" size={16} color={Colors[colorScheme ?? 'light'].icon} />
+          {searchQuery.length >= 2 && (
+            <TouchableOpacity 
+              style={styles.searchButton}
+              onPress={() => searchUsers(searchQuery)}
+              disabled={isSearching}
+            >
+              {isSearching ? (
+                <IconSymbol name="arrow.2.circlepath" size={16} color="white" />
+              ) : (
+                <ThemedText style={styles.searchButtonText}>Search</ThemedText>
+              )}
+            </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Open to Friends Toggle */}
-      <ThemedView style={styles.section}>
-        <View style={styles.toggleSection}>
-          <View style={styles.toggleInfo}>
-            <ThemedText style={styles.toggleTitle}>Open to Friends</ThemedText>
-            <ThemedText style={styles.toggleSubtitle}>
-              Allow others to find and send you friend requests
-            </ThemedText>
-          </View>
-          <Switch
-            value={isOpenToFriends}
-            onValueChange={toggleOpenToFriends}
-            trackColor={{ false: '#767577', true: '#007AFF' }}
-          />
-        </View>
-      </ThemedView>
-
-      {/* Search Results */}
-      {searchQuery.length >= 2 && (
+      {/* Search Results - Show only when search button is clicked */}
+      {showSearchResults && searchQuery.length >= 2 && (
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
             Search Results
@@ -473,6 +745,9 @@ export default function FriendsScreen() {
                   
                   <View style={styles.userDetails}>
                     <ThemedText style={styles.userUsername}>{user.username}</ThemedText>
+                    <ThemedText style={styles.userBio} numberOfLines={2}>
+                      {user.bio}
+                    </ThemedText>
                     <View style={styles.userInterests}>
                       {user.interests?.slice(0, 3).map((interest, index) => (
                         <View key={index} style={styles.interestTag}>
@@ -486,7 +761,7 @@ export default function FriendsScreen() {
                 <View style={styles.userActions}>
                   {user.friendship_status === 'none' && (
                     <TouchableOpacity 
-                      style={styles.addButton}
+                      style={styles.addFriendButton}
                       onPress={() => sendFriendRequest(user.id, user.username)}
                     >
                       <IconSymbol name="person.badge.plus" size={16} color="white" />
@@ -501,7 +776,7 @@ export default function FriendsScreen() {
                   {user.friendship_status === 'friends' && (
                     <TouchableOpacity 
                       style={styles.messageButton}
-                      onPress={() => openConversation(user.id, user.username)}
+                      onPress={() => openDirectConversation(user.id, user.username)}
                     >
                       <IconSymbol name="message" size={16} color="#007AFF" />
                       <ThemedText style={styles.messageButtonText}>Message</ThemedText>
@@ -514,67 +789,162 @@ export default function FriendsScreen() {
         </ThemedView>
       )}
 
-      {/* Current Friends */}
+      {/* AI Friend Suggestions Button */}
+      <TouchableOpacity 
+        style={styles.aiSuggestButton}
+        onPress={getAIFriendRecommendations}
+        disabled={isLoadingAI}
+      >
+        <View style={styles.aiSuggestContent}>
+          <IconSymbol 
+            name={isLoadingAI ? "arrow.2.circlepath" : "sparkles"} 
+            size={20} 
+            color={LadColors.primary} 
+          />
+          <ThemedText style={styles.aiSuggestText}>
+            {isLoadingAI ? 'Finding suggestions...' : 'Suggest a friend with AI'}
+          </ThemedText>
+        </View>
+      </TouchableOpacity>
+
+      {/* Open to Friends Toggle */}
       <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          Your Friends ({friends?.length || 0})
-        </ThemedText>
-        
-        {!friends || friends.length === 0 ? (
-          <ThemedView style={styles.emptyState}>
-            <IconSymbol 
-              name="person.2.circle" 
-              size={48} 
-              color={Colors[colorScheme ?? 'light'].icon} 
-            />
-            <ThemedText style={styles.emptyTitle}>No friends yet</ThemedText>
-            <ThemedText style={styles.emptyText}>
-              Search for friends above to get started
+        <View style={styles.toggleSection}>
+          <View style={styles.toggleInfo}>
+            <ThemedText style={styles.toggleTitle}>Open to Friends</ThemedText>
+            <ThemedText style={styles.toggleSubtitle}>
+              Allow others to find and send you friend requests
             </ThemedText>
-          </ThemedView>
-        ) : (
-          friends?.map((friendship) => (
-            <View key={friendship.friendship_id} style={styles.friendCard}>
-              <View style={styles.userInfo}>
-                <View style={styles.avatarContainer}>
-                  <View style={styles.avatar}>
-                    <IconSymbol 
-                      name="person.crop.circle" 
-                      size={40} 
-                      color={Colors[colorScheme ?? 'light'].icon} 
-                    />
-                  </View>
-                  {friendship.friend.is_verified && (
-                    <View style={styles.verifiedBadge}>
-                      <IconSymbol name="checkmark" size={10} color="white" />
+          </View>
+          <Switch
+            value={isOpenToFriends}
+            onValueChange={toggleOpenToFriends}
+            trackColor={{ false: '#767577', true: '#007AFF' }}
+          />
+        </View>
+      </ThemedView>
+
+      {/* Current Friends */}
+      {friends && friends.length > 0 && (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            Your Friends ({friends.length})
+          </ThemedText>
+          
+          <View style={styles.friendsList}>
+            {friends.map((friendship) => (
+              <TouchableOpacity 
+                key={friendship.friendship_id} 
+                style={styles.friendCard}
+                onPress={() => viewFriendProfile(friendship.friend.id)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.userInfo}>
+                  <View style={styles.avatarContainer}>
+                    <View style={styles.avatar}>
+                      <IconSymbol 
+                        name="person.crop.circle" 
+                        size={40} 
+                        color={Colors[colorScheme ?? 'light'].icon} 
+                      />
                     </View>
-                  )}
-                </View>
-                
-                <View style={styles.userDetails}>
-                  <ThemedText style={styles.userUsername}>{friendship.friend.username}</ThemedText>
-                  <View style={styles.userInterests}>
-                    {friendship.friend.interests?.slice(0, 3).map((interest, index) => (
-                      <View key={index} style={styles.interestTag}>
-                        <ThemedText style={styles.interestText}>{interest}</ThemedText>
+                    {friendship.friend.is_verified && (
+                      <View style={styles.verifiedBadge}>
+                        <IconSymbol name="checkmark" size={10} color="white" />
                       </View>
-                    ))}
+                    )}
                   </View>
+                  
+                  <View style={styles.userDetails}>
+                    <ThemedText style={styles.userUsername}>{friendship.friend.username}</ThemedText>
+                    <ThemedText style={styles.userBio} numberOfLines={2}>
+                      {friendship.friend.bio}
+                    </ThemedText>
+                    <View style={styles.userInterests}>
+                      {friendship.friend.interests?.slice(0, 3).map((interest, index) => (
+                        <View key={index} style={styles.interestTag}>
+                          <ThemedText style={styles.interestText}>{interest}</ThemedText>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.userActions}>
+                  <TouchableOpacity 
+                    style={styles.messageButton}
+                    onPress={(e) => {
+                      e.stopPropagation(); // Prevent triggering profile view
+                      openDirectConversation(friendship.friend.id, friendship.friend.username);
+                    }}
+                  >
+                    <IconSymbol name="message" size={16} color="#007AFF" />
+                    <ThemedText style={styles.messageButtonText}>Message</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ThemedView>
+      )}
+
+      {/* AI Recommendations */}
+      {aiRecommendations.length > 0 && (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            AI Friend Suggestions
+          </ThemedText>
+          
+          {aiRecommendations.map((user) => (
+              <View key={user.user_id} style={styles.userCard}>
+                <View style={styles.userInfo}>
+                  <View style={styles.avatarContainer}>
+                    <View style={styles.avatar}>
+                      <IconSymbol 
+                        name="person.crop.circle" 
+                        size={40} 
+                        color={Colors[colorScheme ?? 'light'].icon} 
+                      />
+                    </View>
+                    {user.profile_photo_url && (
+                      <ProfilePicture
+                        uri={user.profile_photo_url}
+                        size={40}
+                        style={styles.avatar}
+                      />
+                    )}
+                  </View>
+                  
+                  <View style={styles.userDetails}>
+                    <ThemedText style={styles.userUsername}>{user.username}</ThemedText>
+                    <ThemedText style={styles.userBio} numberOfLines={2}>
+                      {user.bio}
+                    </ThemedText>
+                    <View style={styles.userInterests}>
+                      {user.interests?.slice(0, 3).map((interest, index) => (
+                        <View key={index} style={styles.interestTag}>
+                          <ThemedText style={styles.interestText}>{interest}</ThemedText>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.userActions}>
+                  <TouchableOpacity 
+                    style={styles.addFriendButton}
+                    onPress={() => sendFriendRequest(user.user_id, user.username)}
+                  >
+                    <IconSymbol name="person.badge.plus" size={16} color="white" />
+                    <ThemedText style={styles.addButtonText}>Add</ThemedText>
+                  </TouchableOpacity>
                 </View>
               </View>
+          ))}
+        </ThemedView>
+      )}
 
-              <TouchableOpacity 
-                style={styles.messageButton}
-                onPress={() => openConversation(friendship.friend.id, friendship.friend.username)}
-              >
-                <IconSymbol name="message" size={16} color="#007AFF" />
-                <ThemedText style={styles.messageButtonText}>Message</ThemedText>
-              </TouchableOpacity>
-            </View>
-          ))
-        )}
-      </ThemedView>
-    </View>
+    </ScrollView>
   );
 
   const renderRequestsTab = () => (
@@ -608,7 +978,7 @@ export default function FriendsScreen() {
                       color={Colors[colorScheme ?? 'light'].icon} 
                     />
                   </View>
-                  {request.sender.is_verified && (
+                  {request.requester.is_verified && (
                     <View style={styles.verifiedBadge}>
                       <IconSymbol name="checkmark" size={10} color="white" />
                     </View>
@@ -616,14 +986,14 @@ export default function FriendsScreen() {
                 </View>
                 
                 <View style={styles.userDetails}>
-                  <ThemedText style={styles.userUsername}>{request.sender.username}</ThemedText>
+                  <ThemedText style={styles.userUsername}>{request.requester.username}</ThemedText>
                   {request.message && (
                     <ThemedText style={styles.requestMessage} numberOfLines={2}>
                       "{request.message}"
                     </ThemedText>
                   )}
                   <View style={styles.userInterests}>
-                    {request.sender.interests?.slice(0, 3).map((interest, index) => (
+                    {request.requester.interests?.slice(0, 3).map((interest, index) => (
                       <View key={index} style={styles.interestTag}>
                         <ThemedText style={styles.interestText}>{interest}</ThemedText>
                       </View>
@@ -635,18 +1005,16 @@ export default function FriendsScreen() {
               <View style={styles.requestActions}>
                 <TouchableOpacity 
                   style={styles.acceptButton}
-                  onPress={() => respondToRequest(request.id, 'accept', request.sender.username)}
+                  onPress={() => respondToRequest(request.id, 'accept', request.requester.username)}
                 >
                   <IconSymbol name="checkmark" size={16} color="white" />
-                  <ThemedText style={styles.acceptButtonText}>Accept</ThemedText>
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
                   style={styles.declineButton}
-                  onPress={() => respondToRequest(request.id, 'decline', request.sender.username)}
+                  onPress={() => respondToRequest(request.id, 'decline', request.requester.username)}
                 >
                   <IconSymbol name="xmark" size={16} color="white" />
-                  <ThemedText style={styles.declineButtonText}>Decline</ThemedText>
                 </TouchableOpacity>
               </View>
             </View>
@@ -657,40 +1025,36 @@ export default function FriendsScreen() {
   );
 
   return (
+    <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
-      <ThemedView style={styles.header}>
-        <ThemedText type="title">Friends</ThemedText>
-        <ThemedText style={styles.subtitle}>
-          {activeTab === 'messages' && 'Chat with your lads'}
-          {activeTab === 'discover' && 'Find and connect with friends'}
-          {activeTab === 'requests' && 'Manage friend requests'}
-        </ThemedText>
-      </ThemedView>
+        {/* Header */}
+        <View style={styles.header}>
+          <ThemedText style={styles.title}>Your Crew</ThemedText>
+          <TouchableOpacity 
+            style={styles.addButton}
+            onPress={() => router.push('/search-users')}
+          >
+            <IconSymbol name="person.badge.plus" size={24} color={LadColors.primary} />
+          </TouchableOpacity>
+        </View>
 
       {/* Tab Selector */}
-      <ThemedView style={styles.tabContainer}>
+        <View style={styles.tabContainer}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'messages' && styles.activeTab]}
-          onPress={() => setActiveTab('messages')}
+          style={[styles.tab, activeTab === 'chats' && styles.activeTab]}
+          onPress={() => setActiveTab('chats')}
         >
           <IconSymbol 
             name="message.fill" 
             size={16} 
-            color={activeTab === 'messages' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].icon} 
+              color={activeTab === 'chats' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
-            activeTab === 'messages' && styles.activeTabText
+            activeTab === 'chats' && styles.activeTabText
           ]}>
-            Messages
+            Chats
           </ThemedText>
-          {conversations && conversations.filter(c => c.unread_count > 0).length > 0 && (
-            <View style={styles.tabBadge}>
-              <ThemedText style={styles.tabBadgeText}>
-                {conversations.filter(c => c.unread_count > 0).length}
-              </ThemedText>
-            </View>
-          )}
         </TouchableOpacity>
         
         <TouchableOpacity
@@ -700,7 +1064,7 @@ export default function FriendsScreen() {
           <IconSymbol 
             name="person.2.fill" 
             size={16} 
-            color={activeTab === 'discover' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].icon} 
+              color={activeTab === 'discover' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
@@ -715,38 +1079,39 @@ export default function FriendsScreen() {
           onPress={() => setActiveTab('requests')}
         >
           <IconSymbol 
-            name="person.crop.circle.badge.plus" 
+              name="person.badge.plus" 
             size={16} 
-            color={activeTab === 'requests' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].icon} 
+              color={activeTab === 'requests' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
             activeTab === 'requests' && styles.activeTabText
           ]}>
-            Requests
+              Requests ({friendRequests.length})
           </ThemedText>
-          {friendRequests && friendRequests.length > 0 && (
-            <View style={styles.tabBadge}>
-              <ThemedText style={styles.tabBadgeText}>
-                {friendRequests.length}
-              </ThemedText>
-            </View>
-          )}
         </TouchableOpacity>
-      </ThemedView>
+        </View>
 
-      <ScrollView 
-        style={styles.content} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {activeTab === 'messages' && renderMessagesTab()}
+        {/* Content */}
+        {activeTab === 'chats' && renderChatsTab()}
         {activeTab === 'discover' && renderDiscoverTab()}
         {activeTab === 'requests' && renderRequestsTab()}
-      </ScrollView>
+
+      {/* Friend Profile Modal */}
+      <FriendProfileModal
+        visible={showFriendProfile}
+        onClose={() => setShowFriendProfile(false)}
+        friendId={selectedFriendId}
+      />
+
+      {/* Group Creation Modal */}
+      <GroupCreationModal
+        visible={showGroupCreation}
+        onClose={() => setShowGroupCreation(false)}
+        onGroupCreated={handleGroupCreated}
+      />
     </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -755,18 +1120,35 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
   },
-  subtitle: {
-    opacity: 0.7,
-    marginTop: 4,
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: LadColors.primary,
   },
+  addButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: `${LadColors.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Tab system
   tabContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   tab: {
     flex: 1,
@@ -774,93 +1156,241 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginHorizontal: 2,
-    gap: 6,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginHorizontal: 4,
     position: 'relative',
   },
   activeTab: {
-    backgroundColor: 'rgba(0,122,255,0.1)',
+    backgroundColor: `${LadColors.primary}15`,
   },
   tabText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
+    marginLeft: 6,
   },
   activeTabText: {
-    color: '#007AFF',
-    fontWeight: '600',
+    color: LadColors.primary,
   },
-  tabBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  tabBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-  },
-  tabContent: {
-    paddingHorizontal: 20,
-  },
-  // Search functionality
+  
+  // Search
   searchContainer: {
-    marginBottom: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
     backgroundColor: 'rgba(0,0,0,0.05)',
     borderRadius: 12,
-    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
+    marginLeft: 8,
   },
-  // Messages styles
-  loadingState: {
+  searchButton: {
+    backgroundColor: LadColors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  searchButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Content
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
   },
-  emptyState: {
+  loadingText: {
+    fontSize: 16,
+    opacity: 0.7,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
     paddingHorizontal: 40,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     marginTop: 16,
     marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    opacity: 0.7,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  primaryButton: {
+    backgroundColor: LadColors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  primaryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Friend items
+  friendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  friendInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  friendDetails: {
+    flex: 1,
+  },
+  friendName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  friendBio: {
+    fontSize: 14,
+    opacity: 0.7,
+    marginBottom: 6,
+  },
+  interestsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  interestTag: {
+    backgroundColor: `${LadColors.primary}15`,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  interestText: {
+    fontSize: 12,
+    color: LadColors.primary,
+    fontWeight: '500',
+  },
+  removeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: `${LadColors.error}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Request items
+  requestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  requestMessage: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    opacity: 0.8,
+    marginBottom: 6,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  acceptButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: LadColors.success,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  declineButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: LadColors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Find Friends Button
+  findFriendsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LadColors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  findFriendsButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+
+  // Messages tab styles
+  tabContent: {
+    flex: 1,
+    padding: 16,
+  },
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
   },
   emptyText: {
+    fontSize: 16,
+    opacity: 0.7,
     textAlign: 'center',
-    opacity: 0.6,
-    lineHeight: 20,
+    lineHeight: 22,
+    marginBottom: 24,
   },
   conversationsList: {
-    paddingVertical: 8,
+    flex: 1,
   },
   conversationItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   avatarContainer: {
     position: 'relative',
@@ -870,10 +1400,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(0,0,0,0.05)',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   verifiedBadge: {
     position: 'absolute',
@@ -882,9 +1411,11 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#007AFF',
+    backgroundColor: LadColors.success,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
   },
   conversationInfo: {
     flex: 1,
@@ -909,47 +1440,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    flex: 1,
     fontSize: 14,
     opacity: 0.7,
-    marginRight: 8,
+    flex: 1,
   },
   unreadMessage: {
+    fontWeight: '600',
     opacity: 1,
-    fontWeight: '500',
   },
   unreadBadge: {
-    backgroundColor: '#007AFF',
+    backgroundColor: LadColors.primary,
     borderRadius: 10,
     minWidth: 20,
     height: 20,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
+    marginLeft: 8,
   },
   unreadCount: {
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
   },
-  // Discover styles
+
+  // Additional styles for discover tab
   section: {
-    marginBottom: 32,
+    backgroundColor: 'transparent',
+    marginVertical: 8,
+    paddingHorizontal: 16,
   },
   sectionTitle: {
-    marginBottom: 16,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   toggleSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.02)',
-    borderRadius: 12,
+    paddingVertical: 12,
   },
   toggleInfo: {
     flex: 1,
-    marginRight: 16,
   },
   toggleTitle: {
     fontSize: 16,
@@ -958,26 +1491,19 @@ const styles = StyleSheet.create({
   },
   toggleSubtitle: {
     fontSize: 14,
-    opacity: 0.6,
-    lineHeight: 18,
+    opacity: 0.7,
   },
-  userCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.02)',
-    borderRadius: 12,
-    marginBottom: 8,
+  friendsList: {
+    gap: 12,
   },
   friendCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: 'rgba(0,0,0,0.02)',
     borderRadius: 12,
-    marginBottom: 8,
   },
   userInfo: {
     flexDirection: 'row',
@@ -986,118 +1512,171 @@ const styles = StyleSheet.create({
   },
   userDetails: {
     flex: 1,
+    marginLeft: 12,
   },
   userUsername: {
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
+  userBio: {
+    fontSize: 14,
+    opacity: 0.7,
+    marginBottom: 6,
+    lineHeight: 18,
+  },
   userInterests: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
   },
-  interestTag: {
-    backgroundColor: 'rgba(0,122,255,0.1)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  interestText: {
-    fontSize: 10,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
   userActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    gap: 4,
-  },
-  addButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
+    marginLeft: 12,
   },
   messageButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,122,255,0.1)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    gap: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
   },
   messageButtonText: {
     color: '#007AFF',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
+    marginLeft: 6,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 12,
+    marginBottom: 8,
   },
   statusButton: {
-    backgroundColor: 'rgba(0,0,0,0.1)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.1)',
   },
   statusText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 14,
     opacity: 0.7,
   },
-  // Requests styles
+  addFriendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: LadColors.primary,
+  },
+  addButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+
+  // Group styles
+  createGroupButton: {
+    marginVertical: 16,
+    paddingHorizontal: 16,
+  },
+  createGroupContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: `${LadColors.primary}10`,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${LadColors.primary}30`,
+    borderStyle: 'dashed',
+  },
+  createGroupIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: LadColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  createGroupText: {
+    flex: 1,
+  },
+  createGroupTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  createGroupSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+  },
+  groupMemberCount: {
+    fontSize: 14,
+    opacity: 0.7,
+  },
+
+  // AI Suggestions styles
+  aiSuggestButton: {
+    marginHorizontal: 16,
+    marginVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${LadColors.primary}30`,
+    borderStyle: 'dashed',
+  },
+  aiSuggestContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+  },
+  aiSuggestText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+    color: LadColors.primary,
+  },
+
+  // Request styles  
   requestsList: {
-    paddingVertical: 8,
+    flex: 1,
+    paddingHorizontal: 16,
   },
   requestCard: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    padding: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: 'rgba(0,0,0,0.02)',
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  requestMessage: {
-    fontSize: 14,
-    fontStyle: 'italic',
-    opacity: 0.8,
-    marginBottom: 4,
-  },
-  requestActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  acceptButton: {
-    flexDirection: 'row',
+
+  // Tab badges  
+  tabBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: LadColors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    gap: 4,
+    paddingHorizontal: 6,
   },
-  acceptButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  declineButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F44336',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    gap: 4,
-  },
-  declineButtonText: {
+  tabBadgeText: {
     color: 'white',
     fontSize: 12,
     fontWeight: '600',

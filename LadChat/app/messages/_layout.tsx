@@ -7,9 +7,8 @@ export default function MessagesLayout() {
       <Stack.Screen 
         name="chat" 
         options={{ 
-          headerShown: true,
+          headerShown: false,
           presentation: 'card',
-          headerBackTitle: 'Messages',
         }} 
       />
       <Stack.Screen 

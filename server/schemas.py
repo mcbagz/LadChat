@@ -88,6 +88,7 @@ class UserUpdate(BaseModel):
     interests: Optional[List[str]] = None
     open_to_friends: Optional[bool] = None
     location_radius: Optional[int] = None
+    profile_photo_url: Optional[str] = None
 
     @validator('bio')
     def validate_bio(cls, v):
@@ -254,12 +255,15 @@ class GroupMessageResponse(BaseModel):
     id: int
     group_id: int
     sender_id: int
-    content: Optional[str]
+    content: Optional[str] = None
     message_type: str
-    view_duration: Optional[int]
-    read_count: int
-    view_count: int
-    is_read_by_user: bool
+    media_url: Optional[str] = None
+    media_type: Optional[str] = None
+    view_duration: Optional[int] = None
+    read_count: int = 0
+    view_count: int = 0
+    is_read_by_user: bool = False
+    system_action: Optional[str] = None
     created_at: datetime
     expires_at: datetime
 
@@ -298,4 +302,340 @@ class ErrorResponse(BaseModel):
     """Generic error response"""
     success: bool = False
     error: str
-    detail: Optional[str] = None 
+    detail: Optional[str] = None
+
+# Group Chat Schemas
+class GroupChatCreate(BaseModel):
+    """Schema for creating a group chat"""
+    name: str
+    description: Optional[str] = None
+    initial_member_ids: Optional[List[int]] = []
+    visibility: str = "private"  # 'public', 'private', 'invite_only'
+    max_members: int = 50
+    
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or len(v.strip()) < 2:
+            raise ValueError('Group name must be at least 2 characters long')
+        if len(v) > 100:
+            raise ValueError('Group name must be less than 100 characters')
+        return v.strip()
+    
+    @validator('description')
+    def validate_description(cls, v):
+        if v and len(v) > 500:
+            raise ValueError('Group description must be less than 500 characters')
+        return v
+    
+    @validator('visibility')
+    def validate_visibility(cls, v):
+        if v not in ['public', 'private', 'invite_only']:
+            raise ValueError('Visibility must be public, private, or invite_only')
+        return v
+    
+    @validator('max_members')
+    def validate_max_members(cls, v):
+        if v < 2 or v > 100:
+            raise ValueError('Max members must be between 2 and 100')
+        return v
+    
+    @validator('initial_member_ids')
+    def validate_initial_members(cls, v):
+        if v and len(v) > 20:
+            raise ValueError('Cannot add more than 20 initial members')
+        return v
+
+class GroupChatUpdate(BaseModel):
+    """Schema for updating group chat settings"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    visibility: Optional[str] = None
+    max_members: Optional[int] = None
+    auto_suggest_members: Optional[bool] = None
+    auto_suggest_events: Optional[bool] = None
+    join_approval_required: Optional[bool] = None
+    
+    @validator('name')
+    def validate_name(cls, v):
+        if v is not None:
+            if not v or len(v.strip()) < 2:
+                raise ValueError('Group name must be at least 2 characters long')
+            if len(v) > 100:
+                raise ValueError('Group name must be less than 100 characters')
+        return v.strip() if v else v
+    
+    @validator('description')
+    def validate_description(cls, v):
+        if v and len(v) > 500:
+            raise ValueError('Group description must be less than 500 characters')
+        return v
+    
+    @validator('visibility')
+    def validate_visibility(cls, v):
+        if v and v not in ['public', 'private', 'invite_only']:
+            raise ValueError('Visibility must be public, private, or invite_only')
+        return v
+    
+    @validator('max_members')
+    def validate_max_members(cls, v):
+        if v and (v < 2 or v > 100):
+            raise ValueError('Max members must be between 2 and 100')
+        return v
+
+class GroupMemberAdd(BaseModel):
+    """Schema for adding members to a group"""
+    user_ids: List[int]
+    make_admin: bool = False
+    
+    @validator('user_ids')
+    def validate_user_ids(cls, v):
+        if not v:
+            raise ValueError('At least one user ID must be provided')
+        if len(v) > 10:
+            raise ValueError('Cannot add more than 10 members at once')
+        return v
+
+class GroupMemberUpdate(BaseModel):
+    """Schema for updating group member permissions"""
+    is_admin: bool
+
+class GroupChatResponse(BaseModel):
+    """Schema for group chat response"""
+    id: int
+    creator_id: int
+    name: str
+    description: Optional[str]
+    avatar_url: Optional[str]
+    member_count: int
+    max_members: int
+    group_interests: List[str]
+    visibility: str
+    join_approval_required: bool
+    auto_suggest_members: bool
+    auto_suggest_events: bool
+    last_message_at: Optional[datetime]
+    message_count: int
+    created_at: datetime
+    is_active: bool
+    user_is_member: bool
+    user_is_admin: bool
+    
+    class Config:
+        from_attributes = True
+
+class GroupMemberResponse(BaseModel):
+    """Schema for group member response"""
+    user_id: int
+    user: UserResponse
+    is_admin: bool
+    joined_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class GroupListResponse(BaseModel):
+    """Schema for user's groups list response"""
+    groups: List[GroupChatResponse]
+    total_count: int
+
+# Event/Hangout Schemas
+class EventCreate(BaseModel):
+    """Schema for creating an event"""
+    title: str
+    description: Optional[str] = None
+    story: Optional[str] = None
+    location_name: str
+    latitude: float
+    longitude: float
+    creator_latitude: float  # Creator's current location for validation
+    creator_longitude: float  # Creator's current location for validation
+    start_time: datetime
+    end_time: datetime
+    rsvp_deadline: Optional[datetime] = None
+    max_attendees: Optional[int] = None
+    visibility: str = "friends"  # 'public', 'friends', 'private', 'groups'
+    shared_with_friends: Optional[List[int]] = []
+    shared_with_groups: Optional[List[int]] = []
+    is_premium: bool = False
+    location_privacy: str = "approximate"  # 'exact', 'approximate', 'hidden'
+    
+    @validator('title')
+    def validate_title(cls, v):
+        if not v or len(v.strip()) < 3:
+            raise ValueError('Event title must be at least 3 characters long')
+        if len(v) > 100:
+            raise ValueError('Event title must be less than 100 characters')
+        return v.strip()
+    
+    @validator('description')
+    def validate_description(cls, v):
+        if v and len(v) > 500:
+            raise ValueError('Event description must be less than 500 characters')
+        return v
+    
+    @validator('story')
+    def validate_story(cls, v):
+        if v and len(v) > 1000:
+            raise ValueError('Event story must be less than 1000 characters')
+        return v
+    
+    @validator('location_name')
+    def validate_location_name(cls, v):
+        if not v or len(v.strip()) < 2:
+            raise ValueError('Location name must be at least 2 characters long')
+        if len(v) > 200:
+            raise ValueError('Location name must be less than 200 characters')
+        return v.strip()
+    
+    @validator('latitude', 'longitude', 'creator_latitude', 'creator_longitude')
+    def validate_coordinates(cls, v):
+        if v is None:
+            raise ValueError('Coordinates are required')
+        return v
+    
+    @validator('visibility')
+    def validate_visibility(cls, v):
+        if v not in ['public', 'friends', 'private', 'groups']:
+            raise ValueError('Visibility must be public, friends, private, or groups')
+        return v
+    
+    @validator('location_privacy')
+    def validate_location_privacy(cls, v):
+        if v not in ['exact', 'approximate', 'hidden']:
+            raise ValueError('Location privacy must be exact, approximate, or hidden')
+        return v
+    
+    @validator('end_time')
+    def validate_end_time(cls, v, values):
+        if 'start_time' in values and values['start_time'] and v <= values['start_time']:
+            raise ValueError('End time must be after start time')
+        return v
+    
+    @validator('start_time')
+    def validate_start_time(cls, v):
+        from datetime import datetime, timedelta, timezone
+        
+        # Ensure we're working with timezone-aware datetimes
+        now = datetime.now(timezone.utc)
+        
+        # If v is timezone-naive, assume it's UTC
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        
+        # Convert to UTC if it's in a different timezone
+        if v.tzinfo != timezone.utc:
+            v = v.astimezone(timezone.utc)
+        
+        max_advance = now + timedelta(weeks=1)
+        
+        if v < now:
+            raise ValueError('Events cannot be created in the past')
+        if v > max_advance:
+            raise ValueError('Events cannot be created more than 1 week in advance')
+        return v
+    
+    @validator('max_attendees')
+    def validate_max_attendees(cls, v):
+        if v is not None and (v < 2 or v > 1000):
+            raise ValueError('Max attendees must be between 2 and 1000')
+        return v
+
+class EventUpdate(BaseModel):
+    """Schema for updating an event"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    story: Optional[str] = None
+    end_time: Optional[datetime] = None
+    rsvp_deadline: Optional[datetime] = None
+    max_attendees: Optional[int] = None
+    location_privacy: Optional[str] = None
+    
+    # Note: Cannot update location, start_time, visibility, or premium status after creation
+    
+    @validator('title')
+    def validate_title(cls, v):
+        if v is not None and (not v or len(v.strip()) < 3):
+            raise ValueError('Event title must be at least 3 characters long')
+        if v and len(v) > 100:
+            raise ValueError('Event title must be less than 100 characters')
+        return v.strip() if v else v
+
+class EventRSVP(BaseModel):
+    """Schema for RSVP to an event"""
+    status: str  # 'yes', 'maybe', 'no'
+    comment: Optional[str] = None
+    
+    @validator('status')
+    def validate_status(cls, v):
+        if v not in ['yes', 'maybe', 'no']:
+            raise ValueError('RSVP status must be yes, maybe, or no')
+        return v
+    
+    @validator('comment')
+    def validate_comment(cls, v):
+        if v and len(v) > 200:
+            raise ValueError('RSVP comment must be less than 200 characters')
+        return v
+
+class EventResponse(BaseModel):
+    """Schema for event response"""
+    id: int
+    creator_id: int
+    title: str
+    description: Optional[str]
+    story: Optional[str]
+    location_name: Optional[str]  # Based on privacy settings
+    latitude: Optional[float]  # Based on privacy settings
+    longitude: Optional[float]  # Based on privacy settings
+    start_time: datetime
+    end_time: datetime
+    rsvp_deadline: Optional[datetime]
+    expires_at: datetime
+    visibility: str
+    max_attendees: Optional[int]
+    attendee_count: int
+    maybe_count: int
+    declined_count: int
+    friend_attendee_count: Optional[int]  # Only shown to friends
+    is_premium: bool
+    is_featured: bool
+    is_ongoing: bool
+    is_active: bool
+    view_count: Optional[int]  # Only shown to creator for premium events
+    story_media: List[dict]
+    media_url: Optional[str]
+    media_type: Optional[str]
+    can_rsvp: bool
+    user_rsvp: Optional[dict]
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class EventListResponse(BaseModel):
+    """Schema for event list response"""
+    events: List[EventResponse]
+    total_count: int
+    has_more: bool
+
+class EventStatsResponse(BaseModel):
+    """Schema for event statistics (creator only)"""
+    event_id: int
+    view_count: int
+    attendee_count: int
+    maybe_count: int
+    friend_attendee_count: int
+    rsvp_breakdown: dict  # Detailed RSVP statistics
+
+# Premium Event Payment Schema
+class PremiumEventPayment(BaseModel):
+    """Schema for premium event payment"""
+    event_id: int
+    payment_method_id: str  # Stripe payment method ID
+    
+    @validator('payment_method_id')
+    def validate_payment_method(cls, v):
+        if not v or not v.startswith('pm_'):
+            raise ValueError('Valid Stripe payment method ID required')
+        return v 

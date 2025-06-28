@@ -1,0 +1,70 @@
+Phase 1: Enhanced Camera Experience (Snapchat-like UX)
+1.1 Camera Preview & Media Processing
+- Photo Preview: After taking a photo, show preview screen instead of camera view
+- Video Preview: Loop video silently during editing
+- Video Recording Fix: Resolve current video recording issues
+- Duration Control: Implement 20-second video limit with visual indicator
+1.2 Media Editing Interface
+- Caption System: Text overlay with positioning, fonts, and colors
+- Drawing Tools: Simple drawing palette with colors and brush sizes
+- Filter System: Basic filters (B&W, sepia, vintage) with real-time preview
+- Media Controls: Delete, retake, and proceed options
+1.3 Enhanced Sending Options
+- Dual Tab System: Friends tab + Group Chats tab in FriendSelector
+- Mixed Recipients: Send to combination of individual friends and group chats
+- Send Confirmation: Better UX flow after sending
+Phase 2: Profile System Overhaul
+2.1 Profile Picture Management
+- Camera Integration: Take new profile pic or select from gallery
+- Profile Pic Display: Show everywhere (stories, chats, events, friend search)
+- Image Processing: Crop, resize, and optimize profile images
+2.2 Profile Editing
+- Enhanced Edit Mode: Better UX for bio and interests editing
+- Real-time Updates: Immediate reflection of changes across app
+- Profile Completion: Encourage users to complete their profiles
+2.3 Profile Visibility
+- User Search Enhancement: Profile previews in friend search
+- Story Integration: Profile pics as story thumbnails
+- Chat Integration: Profile pics in all messaging contexts
+Phase 3: Complete Group Chat System
+3.1 Group Creation & Management
+- Group Creation Flow: Name, description, initial members
+- Admin Controls: Add/remove members, promote to moderator
+- Member Permissions: Different levels of control
+- Dynamic Membership: Real-time member changes
+3.2 Group Chat UI
+- Chat Interface: Similar to DM but with group-specific features
+- Member List: View all members with roles indicated
+- Group Settings: Metadata, member management, leave group
+- Friend Requests: Add non-friends if they're group members
+3.3 Group Messaging
+- Text & Media: Full messaging capability
+- Snap Integration: Send snaps to groups via camera
+- Read Receipts: Group-appropriate read status
+Phase 4: Comprehensive Notification System
+4.1 Notification Types
+- Friend Requests: New requests and responses
+- Direct Messages: Text and media messages
+- Stories: New stories from friends (with smart batching)
+- Group Chat: Messages and member changes
+- Events: Event invitations and updates
+4.2 Notification Management
+- Smart Badges: Accurate unread counts
+- Notification Center: In-app notification history
+- Push Notifications: Firebase integration with proper targeting
+- User Controls: Granular notification preferences
+Phase 5: Advanced Events System
+5.1 Event Creation
+- Location-Based: Must be at location to create event
+- Rich Event Data: Title, description, media, time constraints
+- Privacy Levels: Private to friends/groups vs public (premium)
+- Creation Limits: Max 3 events per user, 1 week advance limit
+5.2 Event Discovery & Management
+- Events Tab: List and map views with filtering
+- RSVP System: Going/Not Going with friend visibility
+- Location Privacy: 5-mile radius for public events
+- Smart Notifications: Upcoming events, friend activity
+5.3 Premium Features
+- Public Events: $50 fee for public event creation
+- Enhanced Visibility: Public events in discovery feed
+- Analytics: View counts and engagement for premium events

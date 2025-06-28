@@ -7,6 +7,10 @@ from sqlalchemy.exc import SQLAlchemyError
 import uvicorn
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import utilities
 from utils.logging_config import setup_logging
@@ -78,8 +82,9 @@ async def health_check():
     
     try:
         # Test database connection
+        from sqlalchemy import text
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
     except Exception as e:
         health_data["services"]["database"] = "unhealthy"
@@ -124,6 +129,11 @@ from routes.stories import router as stories_router
 from routes.snaps import router as snaps_router
 from routes.media import router as media_router
 from routes.friends import router as friends_router
+from routes.users import router as users_router
+from routes.events import router as events_router
+from routes.recommendations import router as recommendations_router
+from routes.notifications import router as notifications_router
+from routes.venues import router as venues_router
 from database import create_tables, SessionLocal
 from config import settings
 
@@ -138,6 +148,11 @@ app.include_router(stories_router)
 app.include_router(snaps_router)
 app.include_router(media_router)
 app.include_router(friends_router)
+app.include_router(users_router)
+app.include_router(events_router)
+app.include_router(recommendations_router)
+app.include_router(notifications_router)
+app.include_router(venues_router)
 
 # Startup and shutdown events
 @app.on_event("startup")
@@ -148,7 +163,17 @@ async def startup_event():
     # Start background task manager
     await task_manager.start()
     
-    logger.info("LadChat API started successfully")
+    # Initialize embedding tasks - DISABLED FOR TESTING
+    # For testing the simplified embedding system, we create embeddings immediately
+    # on user registration, profile updates, and event creation instead of using background tasks
+    # try:
+    #     from ai.embedding_tasks import initialize_embedding_tasks
+    #     await initialize_embedding_tasks()
+    #     logger.info("Embedding tasks initialized")
+    # except Exception as e:
+    #     logger.warning(f"Failed to initialize embedding tasks: {e}")
+    
+    logger.info("LadChat API started successfully (embedding background tasks disabled for testing)")
 
 @app.on_event("shutdown")
 async def shutdown_event():

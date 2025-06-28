@@ -48,7 +48,8 @@
           "photosPermission": "Allow LadChat to access your photos to share memories with friends.",
           "savePhotosPermission": "Allow LadChat to save photos to your device."
         }
-      ]
+      ],
+      "react-native-vision-camera"
     ],
     "experiments": {
       "typedRoutes": true

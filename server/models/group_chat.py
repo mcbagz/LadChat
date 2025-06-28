@@ -47,6 +47,7 @@ class GroupChat(Base):
     
     # Relationships
     creator = relationship("User", back_populates="created_groups")
+    embedding = relationship("GroupEmbedding", back_populates="group_chat", uselist=False)
 
     def __repr__(self):
         return f"<GroupChat(id={self.id}, name='{self.name}', members={self.member_count})>"

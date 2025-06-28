@@ -13,8 +13,19 @@ python-decouple==3.8
 aiofiles==24.1.0  # Async file operations
 Pillow==10.4.0  # Image processing (optional for validation)
 
+# Phase 5 additions
+python-geohash==0.8.5  # Location-based event geohashing
+
 # For future phases
 # boto3==1.35.0  # AWS S3 integration
 # stripe==10.9.0  # Payment processing
 # transformers==4.45.0  # AI/ML for friend matching
-# torch==2.5.0  # PyTorch for AI models 
+# torch==2.5.0  # PyTorch for AI models
+
+# New dependencies for RAG system, ChromaDB, and OpenAI integration
+cryptography==41.0.7
+chromadb>=0.4.18
+openai>=1.12.0
+numpy>=1.24.0
+Pillow>=10.0.0
+python-dotenv>=1.0.0 

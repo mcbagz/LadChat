@@ -35,12 +35,17 @@ class User(Base):
     
     # Relationships
     stories = relationship("Story", back_populates="user", lazy="dynamic")
-    created_hangouts = relationship("Hangout", back_populates="creator", lazy="dynamic")
+    created_events = relationship("Event", back_populates="creator", lazy="dynamic")
+    created_hangouts = relationship("Event", back_populates="creator", lazy="dynamic", overlaps="created_events")  # Backward compatibility
     created_groups = relationship("GroupChat", back_populates="creator", lazy="dynamic")
     
     # Friend relationships
     sent_friend_requests = relationship("FriendRequest", foreign_keys="FriendRequest.sender_id", back_populates="sender", lazy="dynamic")
     received_friend_requests = relationship("FriendRequest", foreign_keys="FriendRequest.recipient_id", back_populates="recipient", lazy="dynamic")
+
+    # RAG and notification relationships
+    embedding = relationship("UserEmbedding", back_populates="user", uselist=False)
+    chat_activities = relationship("ChatActivity", back_populates="user", lazy="dynamic")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', active={self.is_active})>"
