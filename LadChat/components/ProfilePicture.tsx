@@ -64,9 +64,9 @@ export default function ProfilePicture({
       let imageUri = uri;
       if (uri.startsWith('/media/')) {
         // Convert relative backend URL to full URL
-        const API_BASE_URL = __DEV__ 
+        const API_BASE_URL = 'https://ladchat.bagztech.com'; /*__DEV__ 
           ? 'http://192.168.0.14:8000'  // Development
-          : 'https://api.ladchat.com'; // Production
+          : 'https://api.ladchat.com'; // Production*/
         imageUri = `${API_BASE_URL}${uri}`;
       }
       

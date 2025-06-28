@@ -51,9 +51,9 @@ const STORAGE_KEYS = {
 };
 
 // API Configuration
-const API_BASE_URL = __DEV__ 
+const API_BASE_URL = 'https://ladchat.bagztech.com'; /*__DEV__ 
   ? 'http://192.168.0.14:8000'  // Development - will work for both iOS simulator and web
-  : 'https://api.ladchat.com'; // Production
+  : 'https://api.ladchat.com'; // Production*/
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
