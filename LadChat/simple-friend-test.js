@@ -1,6 +1,6 @@
 // Simple test to verify friend endpoints work
 async function testFriends() {
-  const API_BASE = 'http://192.168.0.14:8000';
+  const API_BASE = 'https://ladchat.bagztech.com';
   
   console.log('🚀 Testing Friend System...');
   

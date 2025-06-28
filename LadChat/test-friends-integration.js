@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://192.168.0.14:8000';
+const API_BASE_URL = 'https://ladchat.bagztech.com';
 
 console.log('🚀 Testing LadChat Friend System Integration...\n');
 
