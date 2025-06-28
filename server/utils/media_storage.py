@@ -34,6 +34,7 @@ class MediaStorageManager:
         (self.storage_path / "stories").mkdir(exist_ok=True)
         (self.storage_path / "snaps").mkdir(exist_ok=True)
         (self.storage_path / "hangouts").mkdir(exist_ok=True)
+        (self.storage_path / "events").mkdir(exist_ok=True)  # Phase 5 events
         (self.storage_path / "profiles").mkdir(exist_ok=True)
         (self.storage_path / "venues").mkdir(exist_ok=True)
     
@@ -76,6 +77,10 @@ class MediaStorageManager:
     async def save_hangout_media(self, file: UploadFile, user_id: int) -> Tuple[str, str]:
         """Save media file for a hangout"""
         return await self._save_media_file(file, user_id, "hangouts")
+    
+    async def save_event_media(self, file: UploadFile, user_id: int) -> Tuple[str, str]:
+        """Save media file for an event (Phase 5)"""
+        return await self._save_media_file(file, user_id, "events")
     
     async def save_profile_media(self, file: UploadFile, user_id: int) -> Tuple[str, str]:
         """Save media file for a profile"""
@@ -229,6 +234,8 @@ async def save_uploaded_file(file: UploadFile, user_id: int, category: str) -> T
         return await media_storage.save_snap_media(file, user_id)
     elif category == "hangout":
         return await media_storage.save_hangout_media(file, user_id)
+    elif category == "event":
+        return await media_storage.save_event_media(file, user_id)
     elif category == "profile":
         return await media_storage.save_profile_media(file, user_id)
     elif category == "venue":

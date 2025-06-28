@@ -7,18 +7,22 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
+import ProfilePicture from '@/components/ProfilePicture';
+import ProfilePictureSelector from '@/components/ProfilePictureSelector';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const { user, updateProfile, logout } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showPictureSelector, setShowPictureSelector] = useState(false);
   
   // Use real user data from context
   const [editingProfile, setEditingProfile] = useState({
     bio: user?.bio || '',
     interests: user?.interests || [],
     open_to_friends: user?.open_to_friends || false,
+    profile_photo_url: user?.profile_photo_url || undefined,
   });
 
   // Update editing profile when user data changes
@@ -28,6 +32,7 @@ export default function ProfileScreen() {
         bio: user.bio || '',
         interests: user.interests || [],
         open_to_friends: user.open_to_friends || false,
+        profile_photo_url: user.profile_photo_url || undefined,
       });
     }
   }, [user]);
@@ -35,8 +40,21 @@ export default function ProfileScreen() {
   const availableInterests = [
     'Soccer', 'Basketball', 'Gaming', 'BBQ', 'Hiking', 'Photography',
     'Music', 'Movies', 'Coffee', 'Fitness', 'Tech', 'Art', 'Cooking',
-    'Travel', 'Reading', 'Cycling', 'Skateboarding', 'Surfing'
+    'Travel', 'Reading', 'Cycling', 'Skateboarding', 'Surfing', 'Beach',
+    'Climbing', 'Running', 'Swimming', 'Yoga', 'Comedy', 'Outdoors'
   ];
+
+  const getProfileCompletionPercentage = () => {
+    let completed = 0;
+    const total = 4; // Username (always exists), bio, interests, profile picture
+    
+    if (editingProfile.bio && editingProfile.bio.trim()) completed += 1;
+    if (editingProfile.interests.length > 0) completed += 1;
+    if (editingProfile.profile_photo_url) completed += 1;
+    completed += 1; // Username always exists
+    
+    return Math.round((completed / total) * 100);
+  };
 
   const handleSaveProfile = async () => {
     setIsUpdating(true);
@@ -61,6 +79,7 @@ export default function ProfileScreen() {
         bio: user.bio || '',
         interests: user.interests || [],
         open_to_friends: user.open_to_friends || false,
+        profile_photo_url: user.profile_photo_url || undefined,
       });
     }
     setIsEditing(false);
@@ -80,6 +99,94 @@ export default function ProfileScreen() {
     } else {
       Alert.alert('Limit Reached', 'You can select up to 3 interests');
     }
+  };
+
+  const handleProfilePictureSelected = async (imageUri: string) => {
+    if (!imageUri) {
+      // Handle profile picture removal
+      const newProfileData = {
+        ...editingProfile,
+        profile_photo_url: undefined,
+      };
+      
+      setEditingProfile(newProfileData);
+      
+      if (!isEditing) {
+        setIsUpdating(true);
+        try {
+          const success = await updateProfile(newProfileData);
+          if (success) {
+            Alert.alert('Success', 'Profile picture removed successfully!');
+          } else {
+            Alert.alert('Error', 'Failed to remove profile picture. Please try again.');
+            // Revert on failure
+            setEditingProfile(prev => ({
+              ...prev,
+              profile_photo_url: user?.profile_photo_url || undefined,
+            }));
+          }
+        } catch (error) {
+          Alert.alert('Error', 'Something went wrong. Please try again.');
+          // Revert on failure
+          setEditingProfile(prev => ({
+            ...prev,
+            profile_photo_url: user?.profile_photo_url || undefined,
+          }));
+        } finally {
+          setIsUpdating(false);
+        }
+      }
+      return;
+    }
+
+    // Upload image to backend first
+    setIsUpdating(true);
+    try {
+      // Import the apiClient
+      const { apiClient } = await import('@/services/api');
+      
+      // Upload the image to get a backend URL
+      const uploadResponse = await apiClient.uploadProfilePicture(imageUri);
+      
+      if (uploadResponse.success && uploadResponse.data?.profile_photo_url) {
+        const backendImageUrl = uploadResponse.data.profile_photo_url;
+        
+        const newProfileData = {
+          ...editingProfile,
+          profile_photo_url: backendImageUrl,
+        };
+        
+        setEditingProfile(newProfileData);
+        
+        // Always save immediately when not in edit mode for profile pictures
+        const success = await updateProfile(newProfileData);
+        if (success) {
+          Alert.alert('Success', 'Profile picture updated successfully!');
+        } else {
+          Alert.alert('Error', 'Failed to update profile. Please try again.');
+          // Revert on failure
+          setEditingProfile(prev => ({
+            ...prev,
+            profile_photo_url: user?.profile_photo_url || undefined,
+          }));
+        }
+      } else {
+        Alert.alert('Error', 'Failed to upload image. Please try again.');
+        console.error('Upload failed:', uploadResponse.error);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Something went wrong uploading your image. Please try again.');
+      console.error('Profile picture upload error:', error);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const toggleOpenToFriends = () => {
+    setEditingProfile(prev => ({
+      ...prev,
+      open_to_friends: !prev.open_to_friends,
+    }));
   };
 
   const handleLogout = () => {
@@ -109,36 +216,83 @@ export default function ProfileScreen() {
     );
   };
 
+  const completionPercentage = getProfileCompletionPercentage();
+
   return (
     <ThemedView style={styles.container}>
       <ThemedView style={styles.header}>
         <ThemedText type="title">Profile</ThemedText>
-        <TouchableOpacity 
-          style={styles.editButton}
-          onPress={() => isEditing ? handleSaveProfile() : setIsEditing(true)}
-        >
-          <IconSymbol 
-            name={isEditing ? "checkmark" : "pencil"} 
-            size={20} 
-            color={Colors[colorScheme ?? 'light'].tint} 
-          />
-        </TouchableOpacity>
+        {!isEditing ? (
+          <TouchableOpacity 
+            style={styles.editProfileButton}
+            onPress={() => setIsEditing(true)}
+          >
+            <IconSymbol name="pencil" size={16} color="white" />
+            <ThemedText style={styles.editProfileButtonText}>Edit Profile</ThemedText>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerEditActions}>
+            <TouchableOpacity 
+              style={styles.cancelEditButton}
+              onPress={handleCancelEdit}
+            >
+              <ThemedText style={styles.cancelEditButtonText}>Cancel</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.saveEditButton, isUpdating && styles.disabledButton]}
+              onPress={handleSaveProfile}
+              disabled={isUpdating}
+            >
+              <IconSymbol name="checkmark" size={16} color="white" />
+              <ThemedText style={styles.saveEditButtonText}>
+                {isUpdating ? 'Saving...' : 'Save'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
       </ThemedView>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Profile Completion Banner */}
+        {completionPercentage < 100 && (
+          <ThemedView style={styles.completionBanner}>
+            <View style={styles.completionHeader}>
+              <IconSymbol name="chart.pie.fill" size={20} color="#007AFF" />
+              <ThemedText style={styles.completionTitle}>
+                Profile {completionPercentage}% Complete
+              </ThemedText>
+            </View>
+            <ThemedText style={styles.completionText}>
+              Complete your profile to get better friend recommendations!
+            </ThemedText>
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressFill, 
+                  { width: `${completionPercentage}%` }
+                ]} 
+              />
+            </View>
+          </ThemedView>
+        )}
+
         {/* Profile Info */}
         <ThemedView style={styles.profileSection}>
-          <View style={styles.profilePicture}>
-            <IconSymbol 
-              name="person.crop.circle.fill" 
-              size={80} 
-              color={Colors[colorScheme ?? 'light'].icon} 
+          <View style={styles.profilePictureContainer}>
+            <ProfilePicture
+              uri={editingProfile.profile_photo_url}
+              size={100}
+              showVerified={user?.is_verified}
+              onPress={() => setShowPictureSelector(true)}
+              borderWidth={3}
+              borderColor={isEditing ? '#007AFF' : 'rgba(0,0,0,0.1)'}
             />
-            {isEditing && (
-              <TouchableOpacity style={styles.editPictureButton}>
-                <IconSymbol name="camera.fill" size={16} color="white" />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity 
+              style={styles.editPictureButton}
+              onPress={() => setShowPictureSelector(true)}
+            >
+              <IconSymbol name="camera.fill" size={16} color="white" />
+            </TouchableOpacity>
           </View>
 
           {isEditing ? (
@@ -147,18 +301,28 @@ export default function ProfileScreen() {
                 <ThemedText style={styles.username}>{user?.username || 'Username'}</ThemedText>
               </View>
               <TextInput
-                style={[styles.input, styles.bioInput]}
+                style={[
+                  styles.input, 
+                  styles.bioInput,
+                  { color: Colors[colorScheme ?? 'light'].text }
+                ]}
                 value={editingProfile.bio}
                 onChangeText={(text) => setEditingProfile(prev => ({ ...prev, bio: text }))}
                 placeholder="Bio (optional)"
+                placeholderTextColor={Colors[colorScheme ?? 'light'].text + '60'}
                 maxLength={100}
                 multiline
               />
+              <ThemedText style={styles.characterCount}>
+                {editingProfile.bio.length}/100 characters
+              </ThemedText>
             </View>
           ) : (
             <View style={styles.profileInfo}>
               <ThemedText style={styles.username}>{user?.username || 'Username'}</ThemedText>
-              <ThemedText style={styles.bio}>{user?.bio || 'No bio yet'}</ThemedText>
+              <ThemedText style={styles.bio}>
+                {editingProfile.bio || 'No bio yet'}
+              </ThemedText>
             </View>
           )}
         </ThemedView>
@@ -209,31 +373,54 @@ export default function ProfileScreen() {
             </View>
           ) : (
             <View style={styles.interestsRow}>
-              {(user?.interests || []).map((interest: string, index: number) => (
-                <View key={index} style={styles.interestTag}>
-                  <ThemedText style={styles.interestTagText}>{interest}</ThemedText>
-                </View>
-              ))}
+              {editingProfile.interests.length > 0 ? (
+                editingProfile.interests.map((interest: string, index: number) => (
+                  <View key={index} style={styles.interestTag}>
+                    <ThemedText style={styles.interestTagText}>{interest}</ThemedText>
+                  </View>
+                ))
+              ) : (
+                <ThemedText style={styles.noInterests}>
+                  No interests selected yet
+                </ThemedText>
+              )}
             </View>
           )}
         </ThemedView>
 
-        {isEditing && (
-          <View style={styles.editActions}>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
-              <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.saveButton, isUpdating && styles.disabledButton]} 
-              onPress={handleSaveProfile}
-              disabled={isUpdating}
-            >
-              <ThemedText style={styles.saveButtonText}>
-                {isUpdating ? 'Saving...' : 'Save Changes'}
-              </ThemedText>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Friend Discovery Settings */}
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            Friend Discovery
+          </ThemedText>
+          
+          <TouchableOpacity 
+            style={styles.settingItem}
+            onPress={toggleOpenToFriends}
+            disabled={!isEditing}
+          >
+            <View style={styles.settingContent}>
+              <IconSymbol name="person.2.circle" size={20} color={Colors[colorScheme ?? 'light'].icon} />
+              <View style={styles.settingTextContainer}>
+                <ThemedText style={styles.settingText}>Open to Friends</ThemedText>
+                <ThemedText style={styles.settingSubtext}>
+                  Allow others to find and add you as a friend
+                </ThemedText>
+              </View>
+            </View>
+            <View style={[
+              styles.toggle,
+              editingProfile.open_to_friends && styles.toggleActive
+            ]}>
+              <View style={[
+                styles.toggleThumb,
+                editingProfile.open_to_friends && styles.toggleThumbActive
+              ]} />
+            </View>
+          </TouchableOpacity>
+        </ThemedView>
+
+
 
         {!isEditing && (
           <>
@@ -244,20 +431,26 @@ export default function ProfileScreen() {
               </ThemedText>
               
               <TouchableOpacity style={styles.settingItem}>
-                <IconSymbol name="bell" size={20} color={Colors[colorScheme ?? 'light'].icon} />
-                <ThemedText style={styles.settingText}>Notifications</ThemedText>
+                <View style={styles.settingContent}>
+                  <IconSymbol name="bell" size={20} color={Colors[colorScheme ?? 'light'].icon} />
+                  <ThemedText style={styles.settingText}>Notifications</ThemedText>
+                </View>
                 <IconSymbol name="chevron.right" size={16} color={Colors[colorScheme ?? 'light'].icon} />
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.settingItem}>
-                <IconSymbol name="lock" size={20} color={Colors[colorScheme ?? 'light'].icon} />
-                <ThemedText style={styles.settingText}>Privacy</ThemedText>
+                <View style={styles.settingContent}>
+                  <IconSymbol name="lock" size={20} color={Colors[colorScheme ?? 'light'].icon} />
+                  <ThemedText style={styles.settingText}>Privacy</ThemedText>
+                </View>
                 <IconSymbol name="chevron.right" size={16} color={Colors[colorScheme ?? 'light'].icon} />
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.settingItem}>
-                <IconSymbol name="questionmark.circle" size={20} color={Colors[colorScheme ?? 'light'].icon} />
-                <ThemedText style={styles.settingText}>Help & Support</ThemedText>
+                <View style={styles.settingContent}>
+                  <IconSymbol name="questionmark.circle" size={20} color={Colors[colorScheme ?? 'light'].icon} />
+                  <ThemedText style={styles.settingText}>Help & Support</ThemedText>
+                </View>
                 <IconSymbol name="chevron.right" size={16} color={Colors[colorScheme ?? 'light'].icon} />
               </TouchableOpacity>
             </ThemedView>
@@ -277,6 +470,14 @@ export default function ProfileScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Profile Picture Selector Modal */}
+      <ProfilePictureSelector
+        visible={showPictureSelector}
+        onClose={() => setShowPictureSelector(false)}
+        onImageSelected={handleProfilePictureSelected}
+        currentImageUri={editingProfile.profile_photo_url}
+      />
     </ThemedView>
   );
 }
@@ -296,28 +497,106 @@ const styles = StyleSheet.create({
   editButton: {
     padding: 8,
   },
+  editProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  editProfileButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cancelEditButton: {
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  cancelEditButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  saveEditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  saveEditButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  headerEditActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  completionBanner: {
+    backgroundColor: 'rgba(0,122,255,0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+  },
+  completionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  completionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  completionText: {
+    fontSize: 14,
+    opacity: 0.8,
+    marginBottom: 12,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: 'rgba(0,122,255,0.2)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 3,
   },
   profileSection: {
     alignItems: 'center',
     marginBottom: 32,
   },
-  profilePicture: {
+  profilePictureContainer: {
     position: 'relative',
     marginBottom: 16,
   },
   editPictureButton: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: 4,
+    right: 4,
     backgroundColor: '#007AFF',
-    borderRadius: 16,
-    width: 32,
-    height: 32,
+    borderRadius: 18,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'white',
   },
   editingContainer: {
     width: '100%',
@@ -326,10 +605,11 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
     fontSize: 16,
+    backgroundColor: 'rgba(0,0,0,0.02)',
   },
   usernameInput: {
     width: '80%',
@@ -338,8 +618,13 @@ const styles = StyleSheet.create({
   },
   bioInput: {
     width: '100%',
-    minHeight: 60,
-    textAlign: 'center',
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  characterCount: {
+    fontSize: 12,
+    opacity: 0.6,
+    marginBottom: 12,
   },
   profileInfo: {
     alignItems: 'center',
@@ -354,6 +639,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     textAlign: 'center',
     lineHeight: 22,
+    maxWidth: 280,
   },
   statsSection: {
     flexDirection: 'row',
@@ -385,6 +671,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: 16,
+    fontSize: 18,
+    fontWeight: '600',
   },
   interestsGrid: {
     flexDirection: 'row',
@@ -398,7 +686,7 @@ const styles = StyleSheet.create({
   },
   interestChip: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 20,
     backgroundColor: 'rgba(0,0,0,0.05)',
     borderWidth: 1,
@@ -418,13 +706,67 @@ const styles = StyleSheet.create({
   interestTag: {
     backgroundColor: 'rgba(0,122,255,0.1)',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 16,
   },
   interestTagText: {
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '500',
+  },
+  noInterests: {
+    fontSize: 14,
+    opacity: 0.6,
+    fontStyle: 'italic',
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+  },
+  settingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  settingTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  settingText: {
+    fontSize: 16,
+    marginBottom: 2,
+  },
+  settingSubtext: {
+    fontSize: 12,
+    opacity: 0.6,
+  },
+  toggle: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleActive: {
+    backgroundColor: '#007AFF',
+  },
+  toggleThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  toggleThumbActive: {
+    transform: [{ translateX: 20 }],
   },
   editActions: {
     flexDirection: 'row',
@@ -434,14 +776,14 @@ const styles = StyleSheet.create({
   cancelButton: {
     flex: 1,
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.05)',
     alignItems: 'center',
   },
   saveButton: {
     flex: 1,
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     backgroundColor: '#007AFF',
     alignItems: 'center',
   },
@@ -456,17 +798,6 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-  },
-  settingText: {
-    flex: 1,
-    fontSize: 16,
-    marginLeft: 12,
   },
   logoutButton: {
     flexDirection: 'row',

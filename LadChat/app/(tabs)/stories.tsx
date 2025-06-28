@@ -5,10 +5,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
+import { LadColors, Colors } from '@/constants/Colors';
+import { LadCopy } from '@/utils/LadCopy';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiClient, Story } from '@/services/api';
 import StoryViewer from '@/components/StoryViewer';
+import ProfilePicture from '@/components/ProfilePicture';
 
 export default function StoriesScreen() {
   const colorScheme = useColorScheme();
@@ -141,9 +143,9 @@ export default function StoriesScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedView style={styles.header}>
-        <ThemedText type="title">Stories</ThemedText>
+        <ThemedText type="title" style={{ color: LadColors.primary }}>The Timeline</ThemedText>
         <ThemedText style={styles.subtitle}>
-          Share moments with your lads
+          {LadCopy.STORIES.TIMELINE_SUBTITLE()}
         </ThemedText>
       </ThemedView>
 
@@ -157,7 +159,7 @@ export default function StoriesScreen() {
         {/* My Story Section */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Your Story
+            Your Timeline
           </ThemedText>
           {myStories.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -167,12 +169,12 @@ export default function StoriesScreen() {
                   style={styles.myStoryItem}
                   onPress={() => openStoryViewer(story)}
                 >
-                  <View style={styles.myStoryPreview}>
-                    <IconSymbol 
-                      name={story.media_type === 'photo' ? 'photo.fill' : 'video.fill'}
-                      size={20}
-                      color="white"
-                    />
+                                      <View style={styles.myStoryPreview}>
+                     <ProfilePicture 
+                       size={48}
+                       uri={story.user.profile_photo_url}
+                       showVerified={story.user.is_verified}
+                     />
                   </View>
                   <ThemedText style={styles.myStoryTime} numberOfLines={1}>
                     {formatStoryTime(story.created_at)}
@@ -191,7 +193,7 @@ export default function StoriesScreen() {
               <View style={styles.addStoryCircle}>
                 <IconSymbol name="plus" size={24} color={Colors[colorScheme ?? 'light'].text} />
               </View>
-              <ThemedText style={styles.addStoryText}>Add to your story</ThemedText>
+              <ThemedText style={styles.addStoryText}>{LadCopy.STORIES.ADD_STORY()}</ThemedText>
             </TouchableOpacity>
           )}
         </ThemedView>
@@ -199,7 +201,7 @@ export default function StoriesScreen() {
         {/* Friends Stories */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Friends' Stories
+            The Crew's Latest
           </ThemedText>
           
           {storyFeed.length > 0 ? (
@@ -214,12 +216,12 @@ export default function StoriesScreen() {
                     styles.storyCircle,
                     friendGroup.stories.some(s => !s.has_viewed) && styles.unviewedStoryCircle
                   ]}>
-                    <View style={styles.storyCircleInner}>
-                      <IconSymbol 
-                        name={friendGroup.latestStory.media_type === 'photo' ? 'photo.fill' : 'video.fill'}
-                        size={24}
-                        color="white"
-                      />
+                                          <View style={styles.storyCircleInner}>
+                       <ProfilePicture 
+                         size={48}
+                         uri={friendGroup.latestStory.user.profile_photo_url}
+                         showVerified={friendGroup.latestStory.user.is_verified}
+                       />
                     </View>
                   </View>
                   <ThemedText style={styles.friendStoryUsername} numberOfLines={1}>
@@ -248,10 +250,10 @@ export default function StoriesScreen() {
                 color={Colors[colorScheme ?? 'light'].icon} 
               />
               <ThemedText style={styles.emptyText}>
-                No stories yet
+                {LadCopy.STORIES.NO_STORIES()}
               </ThemedText>
               <ThemedText style={styles.emptySubtext}>
-                When your friends share stories, you'll see them here
+                When the crew drops content, you'll see it here
               </ThemedText>
             </ThemedView>
           )}

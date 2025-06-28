@@ -43,7 +43,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="hangouts"
         options={{
-          title: 'Hangouts',
+          title: 'Events',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="calendar" color={color} />,
         }}
       />

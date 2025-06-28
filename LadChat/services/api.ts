@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // API Configuration
-const API_BASE_URL = __DEV__ 
+const API_BASE_URL = 'https://ladchat.bagztech.com'; /*__DEV__ 
   ? 'http://192.168.0.14:8000'  // Development
-  : 'https://api.ladchat.com'; // Production
+  : 'https://api.ladchat.com'; // Production*/
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -39,6 +39,12 @@ export interface GroupMessage {
   id: number;
   group_id: number;
   sender_id: number;
+  sender: {
+    id: number;
+    username: string;
+    profile_photo_url?: string;
+    is_verified: boolean;
+  };
   content?: string;
   message_type: 'text' | 'media';
   media_url?: string;
@@ -95,19 +101,158 @@ export interface Snap {
 }
 
 export interface Conversation {
-  id: number;
-  other_user_id: number;
-  other_user: {
+  chat_type: 'direct' | 'group';
+  chat_id: number;
+  other_user?: {
     id: number;
     username: string;
     profile_photo_url?: string;
-    is_verified: boolean;
   };
-  last_message?: DirectMessage;
+  group_name?: string;
+  group_avatar_url?: string;
+  member_count?: number;
   unread_count: number;
-  is_archived: boolean;
-  is_muted: boolean;
+  last_message_preview: string;
+  last_message_at: string;
+}
+
+export interface GroupChat {
+  id: number;
+  creator_id: number;
+  name: string;
+  description?: string;
+  avatar_url?: string;
+  member_count: number;
+  max_members: number;
+  group_interests: string[];
+  visibility: 'public' | 'private' | 'invite_only';
+  join_approval_required: boolean;
+  auto_suggest_members: boolean;
+  auto_suggest_events: boolean;
+  last_message_at?: string;
+  message_count: number;
+  created_at: string;
+  is_active: boolean;
+  user_is_member: boolean;
+  user_is_admin: boolean;
+}
+
+export interface GroupMember {
+  user_id: number;
+  user: {
+    id: number;
+    username: string;
+    bio?: string;
+    interests: string[];
+    profile_photo_url?: string;
+    is_verified: boolean;
+    created_at: string;
+  };
+  is_admin: boolean;
+  joined_at: string;
+}
+
+// Event interfaces for Phase 5
+export interface Event {
+  id: number;
+  creator_id: number;
+  title: string;
+  description?: string;
+  story?: string;
+  location_name?: string;
+  latitude?: number;
+  longitude?: number;
+  start_time: string;
+  end_time: string;
+  rsvp_deadline?: string;
+  expires_at: string;
+  visibility: string;
+  max_attendees?: number;
+  attendee_count: number;
+  maybe_count: number;
+  declined_count: number;
+  friend_attendee_count?: number;
+  is_premium: boolean;
+  is_featured: boolean;
+  is_ongoing: boolean;
+  is_active: boolean;
+  view_count?: number;
+  story_media: Array<{
+    url: string;
+    type: string;
+    caption?: string;
+    timestamp: string;
+  }>;
+  media_url?: string;
+  media_type?: string;
+  can_rsvp: boolean;
+  user_rsvp?: {
+    status: string;
+    comment?: string;
+    timestamp: string;
+  };
+  created_at: string;
   updated_at: string;
+}
+
+export interface EventCreateData {
+  title: string;
+  description?: string;
+  story?: string;
+  location_name: string;
+  latitude: number;
+  longitude: number;
+  creator_latitude: number;
+  creator_longitude: number;
+  start_time: string;
+  end_time: string;
+  rsvp_deadline?: string;
+  max_attendees?: number;
+  visibility?: 'public' | 'friends' | 'private' | 'groups';
+  shared_with_friends?: number[];
+  shared_with_groups?: number[];
+  is_premium?: boolean;
+  location_privacy?: 'exact' | 'approximate' | 'hidden';
+}
+
+export interface EventFilters {
+  limit?: number;
+  offset?: number;
+  filter_type?: 'all' | 'friends' | 'public' | 'ongoing' | 'upcoming' | 'my_events';
+  sort_by?: 'start_time' | 'distance' | 'created_at';
+  latitude?: number;
+  longitude?: number;
+  radius_km?: number;
+}
+
+export interface EventRSVP {
+  status: 'yes' | 'maybe' | 'no';
+  comment?: string;
+}
+
+export interface EventRecommendation {
+  event_id: number;
+  title: string;
+  description: string;
+  location_name: string;
+  start_time: string;
+  end_time: string;
+  attendee_count: number;
+  distance_miles: number;
+  similarity_score: number;
+  can_rsvp: boolean;
+  reason: string;
+}
+
+export interface FriendRecommendation {
+  user_id: number;
+  username: string;
+  bio?: string;
+  interests: string[];
+  profile_photo_url?: string;
+  similarity_score: number;
+  mutual_friends_count: number;
+  reason: string;
 }
 
 class ApiClient {
@@ -287,6 +432,20 @@ class ApiClient {
     return this.makeRequest('/messages/conversations');
   }
 
+  async getChatSummary(): Promise<ApiResponse<Conversation[]>> {
+    return this.makeRequest('/notifications/chat-summary');
+  }
+
+  async markChatAsOpened(chatType: 'direct' | 'group', chatId: number): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/mark-chat-opened', {
+      method: 'POST',
+      body: JSON.stringify({
+        chat_type: chatType,
+        chat_id: chatId,
+      }),
+    });
+  }
+
   async getConversationMessages(userId: number, beforeId?: number): Promise<ApiResponse<DirectMessage[]>> {
     const params = new URLSearchParams();
     if (beforeId) params.append('before_id', beforeId.toString());
@@ -335,14 +494,14 @@ class ApiClient {
     });
   }
 
-  async getGroupMessages(groupId: number, beforeId?: number): Promise<ApiResponse<GroupMessage[]>> {
-    const params = new URLSearchParams();
+  async getGroupMessages(groupId: number, limit: number = 50, beforeId?: number): Promise<ApiResponse<GroupMessage[]>> {
+    const params = new URLSearchParams({ limit: limit.toString() });
     if (beforeId) params.append('before_id', beforeId.toString());
     
     return this.makeRequest(`/groups/${groupId}/messages?${params.toString()}`);
   }
 
-  async markGroupMessagesAsRead(groupId: number, messageIds: number[]): Promise<ApiResponse> {
+  async markGroupMessagesAsRead(groupId: number, messageIds: number[]): Promise<ApiResponse<any>> {
     return this.makeRequest(`/groups/${groupId}/messages/read`, {
       method: 'POST',
       body: JSON.stringify({ message_ids: messageIds }),
@@ -482,6 +641,210 @@ class ApiClient {
 
   async getCurrentUser(): Promise<ApiResponse> {
     return this.makeRequest('/auth/me');
+  }
+
+  async getUserProfile(userId: number): Promise<ApiResponse> {
+    return this.makeRequest(`/users/${userId}/profile`);
+  }
+
+  async uploadProfilePicture(imageUri: string): Promise<ApiResponse> {
+    return this.uploadFile('/auth/profile-picture', imageUri, {});
+  }
+
+  // Group Management
+  async createGroup(groupData: {
+    name: string;
+    description?: string;
+    initial_member_ids?: number[];
+    visibility?: 'public' | 'private' | 'invite_only';
+    max_members?: number;
+  }): Promise<ApiResponse<GroupChat>> {
+    return this.makeRequest('/groups', {
+      method: 'POST',
+      body: JSON.stringify(groupData),
+    });
+  }
+
+  async getUserGroups(): Promise<ApiResponse<{ groups: GroupChat[]; total_count: number }>> {
+    return this.makeRequest('/groups');
+  }
+
+  async getGroupInfo(groupId: number): Promise<ApiResponse<GroupChat>> {
+    return this.makeRequest(`/groups/${groupId}/info`);
+  }
+
+  async getGroupMembers(groupId: number): Promise<ApiResponse<GroupMember[]>> {
+    return this.makeRequest(`/groups/${groupId}/members`);
+  }
+
+  async addGroupMembers(groupId: number, userIds: number[], makeAdmin: boolean = false): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_ids: userIds,
+        make_admin: makeAdmin,
+      }),
+    });
+  }
+
+  async removeGroupMember(groupId: number, userId: number): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/groups/${groupId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async updateGroupMember(groupId: number, userId: number, isAdmin: boolean): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/groups/${groupId}/members/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_admin: isAdmin }),
+    });
+  }
+
+  async updateGroup(groupId: number, updates: {
+    name?: string;
+    description?: string;
+    visibility?: 'public' | 'private' | 'invite_only';
+    max_members?: number;
+    auto_suggest_members?: boolean;
+    auto_suggest_events?: boolean;
+    join_approval_required?: boolean;
+  }): Promise<ApiResponse<GroupChat>> {
+    return this.makeRequest(`/groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async joinGroup(groupId: number): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/groups/${groupId}/join`, {
+      method: 'POST',
+    });
+  }
+
+  async leaveGroup(groupId: number): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/groups/${groupId}/leave`, {
+      method: 'POST',
+    });
+  }
+
+  // Events API (Phase 5)
+  async createEvent(eventData: {
+    title: string;
+    description?: string;
+    story?: string;
+    location_name: string;
+    latitude: number;
+    longitude: number;
+    creator_latitude: number;
+    creator_longitude: number;
+    start_time: string;
+    end_time: string;
+    rsvp_deadline?: string;
+    max_attendees?: number;
+    visibility?: string;
+    shared_with_friends?: number[];
+    shared_with_groups?: number[];
+    is_premium?: boolean;
+    location_privacy?: string;
+  }): Promise<ApiResponse<{ event: Event }>> {
+    return this.makeRequest('/events', {
+      method: 'POST',
+      body: JSON.stringify(eventData),
+    });
+  }
+
+  async getEvents(params: {
+    limit?: number;
+    offset?: number;
+    filter_type?: 'all' | 'friends' | 'public' | 'ongoing' | 'upcoming' | 'my_events';
+    sort_by?: 'start_time' | 'distance' | 'created_at';
+    latitude?: number;
+    longitude?: number;
+    radius_km?: number;
+  } = {}): Promise<ApiResponse> {
+    const searchParams = new URLSearchParams();
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        searchParams.append(key, value.toString());
+      }
+    });
+
+    return this.makeRequest(`/events/?${searchParams.toString()}`);
+  }
+
+  async getEvent(eventId: number): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}`);
+  }
+
+  async updateEvent(eventId: number, updates: {
+    title?: string;
+    description?: string;
+    story?: string;
+    end_time?: string;
+    rsvp_deadline?: string;
+    max_attendees?: number;
+    location_privacy?: string;
+  }): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteEvent(eventId: number): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async rsvpToEvent(eventId: number, rsvpData: {
+    status: 'yes' | 'maybe' | 'no';
+    comment?: string;
+  }): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}/rsvp`, {
+      method: 'POST',
+      body: JSON.stringify(rsvpData),
+    });
+  }
+
+  async getEventRSVPs(eventId: number): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}/rsvps`);
+  }
+
+  async addEventMedia(eventId: number, mediaUri: string, caption?: string): Promise<ApiResponse> {
+    return this.uploadFile(`/events/${eventId}/media`, mediaUri, {
+      ...(caption && { caption }),
+    });
+  }
+
+  async getEventStats(eventId: number): Promise<ApiResponse> {
+    return this.makeRequest(`/events/${eventId}/stats`);
+  }
+
+  async getMyActiveEvents(): Promise<ApiResponse> {
+    return this.makeRequest('/events/my/active');
+  }
+
+  async getAttendingEvents(): Promise<ApiResponse> {
+    return this.makeRequest('/events/attending/upcoming');
+  }
+
+  // Recommendations
+  async getFriendRecommendations(limit: number = 10): Promise<ApiResponse<FriendRecommendation[]>> {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+    });
+    return this.makeRequest(`/recommendations/friends?${params.toString()}`);
+  }
+
+  async getEventRecommendations(latitude: number, longitude: number, limit: number = 10): Promise<ApiResponse<{ recommendations: EventRecommendation[] }>> {
+    const params = new URLSearchParams({
+      latitude: latitude.toString(),
+      longitude: longitude.toString(),
+      limit: limit.toString(),
+    });
+    return this.makeRequest(`/recommendations/events?${params.toString()}`);
   }
 }
 

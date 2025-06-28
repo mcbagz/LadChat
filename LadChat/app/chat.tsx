@@ -1,83 +1,236 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  StyleSheet, 
+  View,
   ScrollView, 
-  View, 
-  TouchableOpacity, 
-  Alert, 
   TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
   KeyboardAvoidingView,
   Platform,
-  Image,
-  Modal
+  Modal,
+  Animated,
+  FlatList
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
+import { LadColors, Colors, getLadColor } from '@/constants/Colors';
+import { LadCopy } from '@/utils/LadCopy';
+import { apiClient } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiClient, DirectMessage } from '@/services/api';
+import ProfilePicture from '@/components/ProfilePicture';
+
+interface Message {
+  id: number;
+  sender_id: number;
+  content?: string;
+  message_type: 'text' | 'media';
+  media_type?: 'photo' | 'video';
+  media_url?: string;
+  timestamp: string;
+  is_deleted: boolean;
+  read_by_recipient: boolean;
+}
+
+interface ChatUser {
+  id: number;
+  username: string;
+  profile_photo_url?: string;
+  is_verified: boolean;
+  is_online: boolean;
+  last_seen?: string;
+}
+
+interface PersonalityInsight {
+  trait: string;
+  description: string;
+  compatibility_score: number;
+  conversation_tip: string;
+}
 
 export default function ChatScreen() {
   const colorScheme = useColorScheme();
-  const { user } = useAuth();
+  const { user } = useAuth(); // Get current user
   const params = useLocalSearchParams();
-  const userId = parseInt(params.userId as string);
-  const username = params.username as string;
+  const { userId, username, groupId, groupName, isGroup } = params;
   
-  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSending, setIsSending] = useState(false);
-  const [viewingMedia, setViewingMedia] = useState<DirectMessage | null>(null);
-  const [viewedMessages, setViewedMessages] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [chatUser, setChatUser] = useState<ChatUser | null>(null);
+  const [personalityInsights, setPersonalityInsights] = useState<PersonalityInsight[]>([]);
+  const [showInsights, setShowInsights] = useState(false);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [quickReplies, setQuickReplies] = useState<string[]>([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   
   const scrollViewRef = useRef<ScrollView>(null);
+  const typingTimeout = useRef<NodeJS.Timeout>();
+  const insightsPulse = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
+  const chatId = isGroup === 'true' ? parseInt(groupId as string) : parseInt(userId as string);
+  const chatTitle = isGroup === 'true' ? groupName : username;
+
+  useFocusEffect(
+    useCallback(() => {
     loadMessages();
-  }, [userId]);
+      if (!isGroup) {
+        loadChatUser();
+        loadPersonalityInsights();
+      }
+      generateQuickReplies();
+      markMessagesAsRead();
+      
+      // Start insights animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(insightsPulse, {
+            toValue: 1.2,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(insightsPulse, {
+            toValue: 1,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      return () => {
+        if (typingTimeout.current) {
+          clearTimeout(typingTimeout.current);
+        }
+      };
+    }, [])
+  );
 
   const loadMessages = async () => {
     try {
-      const response = await apiClient.getConversationMessages(userId);
+      setLoading(true);
+      const response = isGroup === 'true' 
+        ? await apiClient.getGroupMessages(chatId, 50, 0)
+        : await apiClient.getConversationMessages(chatId, 50, 0);
+      
       if (response.success && response.data) {
-        setMessages(response.data.reverse());
-      } else {
-        Alert.alert('Error', response.error || 'Failed to load messages');
+        const messagesData = response.data.messages || response.data;
+        setMessages(Array.isArray(messagesData) ? messagesData.reverse() : []);
       }
     } catch (error) {
-      console.error('Error loading messages:', error);
+      console.error('Failed to load messages:', error);
       Alert.alert('Error', 'Failed to load messages');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const sendMessage = async () => {
-    if (!messageText.trim() || isSending) return;
-
-    const tempMessage = messageText.trim();
-    setMessageText('');
-    setIsSending(true);
-
+  const loadChatUser = async () => {
     try {
-      const response = await apiClient.sendMessage(userId, tempMessage);
+      const response = await apiClient.getUserProfile(parseInt(userId as string));
       if (response.success && response.data) {
-        setMessages(prev => [...prev, response.data!]);
-        scrollToBottom();
-      } else {
-        Alert.alert('Error', response.error || 'Failed to send message');
-        setMessageText(tempMessage);
+        setChatUser({
+          id: response.data.id,
+          username: response.data.username,
+          profile_photo_url: response.data.profile_photo_url,
+          is_verified: response.data.is_verified,
+          is_online: response.data.is_online || false,
+          last_seen: response.data.last_seen
+        });
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Failed to load chat user:', error);
+    }
+  };
+
+  const loadPersonalityInsights = async () => {
+    try {
+      // Mock AI personality insights for now
+      const mockInsights: PersonalityInsight[] = [
+        {
+          trait: "Gaming Enthusiast",
+          description: "Loves competitive gaming and esports",
+          compatibility_score: 92,
+          conversation_tip: "Ask about their favorite games or recent matches"
+        },
+        {
+          trait: "Fitness Focused",
+          description: "Regular gym-goer, health conscious",
+          compatibility_score: 78,
+          conversation_tip: "Share workout tips or fitness goals"
+        },
+        {
+          trait: "Social Organizer",
+          description: "Enjoys planning group activities",
+          compatibility_score: 85,
+          conversation_tip: "Suggest group hangouts or events"
+        }
+      ];
+      setPersonalityInsights(mockInsights);
+    } catch (error) {
+      console.error('Failed to load personality insights:', error);
+    }
+  };
+
+  const generateQuickReplies = () => {
+    const replies = [
+      LadCopy.QUICK.YES,
+      LadCopy.QUICK.NO,
+      LadCopy.QUICK.MAYBE,
+      "That's sick! 🔥",
+      "Let's gooo! 🚀",
+      "Absolute legend!",
+      "I'm down",
+      "Count me in",
+      "Nah I'm good",
+      "Maybe later"
+    ];
+    setQuickReplies(replies.slice(0, 6));
+  };
+
+  const sendMessage = async (messageContent?: string) => {
+    const content = messageContent || messageText.trim();
+    if (!content) return;
+
+    setSending(true);
+    try {
+      const response = isGroup === 'true'
+        ? await apiClient.sendGroupMessage(chatId, content)
+        : await apiClient.sendMessage(chatId, content);
+      
+      if (response.success) {
+        setMessageText('');
+        await loadMessages(); // Refresh messages
+        scrollToBottom();
+        
+        // Generate new quick replies based on context
+        setTimeout(generateQuickReplies, 1000);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to send message');
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
       Alert.alert('Error', 'Failed to send message');
-      setMessageText(tempMessage);
     } finally {
-      setIsSending(false);
+      setSending(false);
+      setShowQuickReplies(false);
+    }
+  };
+
+  const markMessagesAsRead = async () => {
+    try {
+      if (!isGroup) {
+        await apiClient.markMessagesAsRead(chatId);
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
     }
   };
 
@@ -87,255 +240,304 @@ export default function ChatScreen() {
     }, 100);
   };
 
+  const handleTyping = (text: string) => {
+    setMessageText(text);
+    setIsTyping(true);
+    
+    if (typingTimeout.current) {
+      clearTimeout(typingTimeout.current);
+    }
+    
+    typingTimeout.current = setTimeout(() => {
+      setIsTyping(false);
+    }, 1000);
+  };
+
   const formatMessageTime = (timestamp: string): string => {
     const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const isMyMessage = (message: DirectMessage): boolean => {
-    return message.sender_id === user?.id;
-  };
-
-  const openCamera = () => {
-    router.push({
-      pathname: '/',
-      params: {
-        directMessage: 'true',
-        recipientId: userId.toString(),
-        recipientUsername: username,
-      },
-    });
-  };
-
-  const viewMediaMessage = async (message: DirectMessage) => {
-    if (viewedMessages.has(message.id)) {
-      Alert.alert('Media Expired', 'This media has already been viewed and is no longer available.');
-      return;
-    }
-
-    // Mark as viewed locally
-    setViewedMessages(prev => new Set([...prev, message.id]));
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
     
-    // Show the media
-    setViewingMedia(message);
+    if (diffMins < 1) return 'now';
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h`;
+    return date.toLocaleDateString();
+  };
 
-    // Mark as viewed on backend if this is a received message
-    if (message.recipient_id === user?.id) {
-      try {
-        await apiClient.markMediaAsViewed(message.id, false);
-      } catch (error) {
-        console.error('Error marking media as viewed:', error);
-      }
+  const getOnlineStatus = () => {
+    if (!chatUser || isGroup) return '';
+    if (chatUser.is_online) return 'Active now';
+    if (chatUser.last_seen) {
+      return `Active ${formatMessageTime(chatUser.last_seen)} ago`;
     }
-
-    // Auto close after view duration
-    setTimeout(() => {
-      setViewingMedia(null);
-    }, (message.view_duration || 10) * 1000);
+    return '';
   };
 
-  const closeMediaViewer = () => {
-    setViewingMedia(null);
-  };
+  const renderMessage = (message: Message, index: number) => {
+    const isFromMe = message.sender_id === user?.id;
+    const showTimestamp = index === 0 || 
+      (new Date(message.timestamp).getTime() - new Date(messages[index - 1]?.timestamp).getTime()) > 300000; // 5 minutes
 
-  const renderMessageContent = (message: DirectMessage) => {
-    if (message.message_type === 'media') {
-      // Check if message has been viewed
-      const hasBeenViewed = viewedMessages.has(message.id) || 
-                           (message.recipient_id === user?.id && message.is_opened);
-      
-      if (hasBeenViewed) {
         return (
-          <View style={styles.expiredMedia}>
-            <IconSymbol name="eye.slash" size={16} color={Colors[colorScheme ?? 'light'].text + '60'} />
-            <ThemedText style={styles.expiredMediaText}>Media expired</ThemedText>
+      <View key={message.id} style={styles.messageContainer}>
+        {showTimestamp && (
+          <View style={styles.timestampContainer}>
+            <ThemedText style={styles.timestampText}>
+              {formatMessageTime(message.timestamp)}
+            </ThemedText>
           </View>
-        );
-      }
-
-      return (
-        <TouchableOpacity onPress={() => viewMediaMessage(message)} style={styles.mediaMessage}>
-          <IconSymbol 
-            name={message.media_type === 'photo' ? 'photo.fill' : 'video.fill'}
-            size={20} 
-            color={isMyMessage(message) ? 'white' : Colors[colorScheme ?? 'light'].tint}
-          />
-          <ThemedText style={[
-            styles.mediaText,
-            isMyMessage(message) ? styles.myMessageText : styles.theirMessageText,
+        )}
+        
+        <View style={[
+          styles.messageBubble,
+          isFromMe ? styles.myMessage : styles.theirMessage
           ]}>
-            {message.media_type === 'photo' ? 'Photo' : 'Video'}
-          </ThemedText>
-          {message.content && (
+          {message.message_type === 'text' ? (
             <ThemedText style={[
-              styles.mediaCaptionText,
-              isMyMessage(message) ? styles.myMessageText : styles.theirMessageText,
+              styles.messageText,
+              isFromMe ? styles.myMessageText : styles.theirMessageText
             ]}>
               {message.content}
             </ThemedText>
+          ) : (
+            <View style={styles.mediaMessage}>
+              <IconSymbol 
+                name={message.media_type === 'photo' ? 'photo' : 'video'} 
+                size={24} 
+                color={isFromMe ? 'white' : LadColors.primary} 
+              />
+              <ThemedText style={[
+                styles.mediaText,
+                isFromMe ? styles.myMessageText : styles.theirMessageText
+              ]}>
+                {message.media_type === 'photo' ? '📸 Photo' : '🎥 Video'}
+              </ThemedText>
+            </View>
           )}
-        </TouchableOpacity>
+          
+          {isFromMe && (
+            <View style={styles.messageStatus}>
+              <IconSymbol 
+                name={message.read_by_recipient ? 'checkmark.circle.fill' : 'checkmark.circle'} 
+                size={12} 
+                color="rgba(255, 255, 255, 0.8)" 
+              />
+            </View>
+          )}
+        </View>
+      </View>
       );
-    }
-
-    return (
-      <ThemedText style={[
-        styles.messageText,
-        isMyMessage(message) ? styles.myMessageText : styles.theirMessageText,
-      ]}>
-        {message.content}
-      </ThemedText>
-    );
   };
 
-  return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+  const renderPersonalityInsights = () => (
+    <Modal
+      visible={showInsights}
+      animationType="slide"
+      presentationStyle="pageSheet"
     >
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setShowInsights(false)}>
+            <ThemedText style={styles.modalCancel}>Close</ThemedText>
+          </TouchableOpacity>
+          <ThemedText style={styles.modalTitle}>AI Personality Insights</ThemedText>
+          <View style={{ width: 50 }} />
+        </View>
+        
+        <ScrollView style={styles.modalContent}>
+          <View style={styles.insightsHeader}>
+            <IconSymbol name="brain.head.profile" size={32} color={LadColors.primary} />
+            <ThemedText style={styles.insightsTitle}>
+              Understanding {username}
+            </ThemedText>
+            <ThemedText style={styles.insightsSubtitle}>
+              AI-powered insights to help you connect better
+            </ThemedText>
+          </View>
+          
+          {personalityInsights.map((insight, index) => (
+            <View key={index} style={styles.insightCard}>
+              <View style={styles.insightHeader}>
+                <ThemedText style={styles.insightTrait}>{insight.trait}</ThemedText>
+                <View style={styles.compatibilityScore}>
+                  <ThemedText style={styles.scoreText}>
+                    {insight.compatibility_score}%
+                  </ThemedText>
+                </View>
+              </View>
+              
+              <ThemedText style={styles.insightDescription}>
+                {insight.description}
+              </ThemedText>
+              
+              <View style={styles.conversationTip}>
+                <IconSymbol name="lightbulb" size={16} color={LadColors.warning} />
+                <ThemedText style={styles.tipText}>
+                  {insight.conversation_tip}
+                </ThemedText>
+              </View>
+            </View>
+          ))}
+          
+          <View style={styles.aiDisclaimer}>
+            <IconSymbol name="info.circle" size={16} color={getLadColor(colorScheme, 'text', 'secondary')} />
+            <ThemedText style={styles.disclaimerText}>
+              These insights are AI-generated based on public profile data and mutual interactions. 
+              Use them as conversation starters, not absolute truths!
+            </ThemedText>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
       <ThemedView style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <IconSymbol name="chevron.left" size={24} color={Colors[colorScheme ?? 'light'].text} />
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <IconSymbol name="chevron.left" size={20} color={LadColors.primary} />
         </TouchableOpacity>
-        <ThemedText style={styles.headerTitle}>{username}</ThemedText>
-        <View style={styles.headerRight} />
+        
+        <View style={styles.headerInfo}>
+          {!isGroup && chatUser && (
+            <ProfilePicture
+              uri={chatUser.profile_photo_url}
+              size={32}
+              showVerified={chatUser.is_verified}
+              style={{ marginRight: 8 }}
+            />
+          )}
+          
+          <View style={styles.headerText}>
+            <ThemedText style={styles.headerTitle}>{chatTitle}</ThemedText>
+            {!isGroup && (
+              <ThemedText style={styles.headerSubtitle}>
+                {getOnlineStatus()}
+              </ThemedText>
+            )}
+          </View>
+        </View>
+        
+        <View style={styles.headerActions}>
+          {!isGroup && personalityInsights.length > 0 && (
+            <Animated.View style={{ transform: [{ scale: insightsPulse }] }}>
+              <TouchableOpacity 
+                style={styles.insightsButton}
+                onPress={() => setShowInsights(true)}
+              >
+                <IconSymbol name="brain.head.profile" size={18} color={LadColors.primary} />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+          
+          <TouchableOpacity style={styles.menuButton}>
+            <IconSymbol name="ellipsis" size={18} color={getLadColor(colorScheme, 'text', 'primary')} />
+          </TouchableOpacity>
+        </View>
       </ThemedView>
 
+      <KeyboardAvoidingView 
+        style={styles.chatContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={90}
+      >
       <ScrollView 
         ref={scrollViewRef}
         style={styles.messagesContainer}
-        showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.messagesContent}
         onContentSizeChange={scrollToBottom}
       >
-        {isLoading ? (
-          <ThemedView style={styles.loadingState}>
-            <ThemedText>Loading messages...</ThemedText>
-          </ThemedView>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ThemedText style={styles.loadingText}>
+                {LadCopy.SYSTEM.LOADING()}
+              </ThemedText>
+            </View>
         ) : messages.length === 0 ? (
-          <ThemedView style={styles.emptyState}>
+            <View style={styles.emptyContainer}>
             <IconSymbol 
               name="message.circle" 
-              size={48} 
-              color={Colors[colorScheme ?? 'light'].icon} 
+                size={64} 
+                color={getLadColor(colorScheme, 'text', 'tertiary')} 
             />
-            <ThemedText style={styles.emptyTitle}>Start a conversation</ThemedText>
-            <ThemedText style={styles.emptyText}>
-              Send a message to {username}
+              <ThemedText style={styles.emptyTitle}>
+                Start the conversation!
+              </ThemedText>
+              <ThemedText style={styles.emptySubtitle}>
+                {LadCopy.MESSAGES.MESSAGE_PLACEHOLDER()}
             </ThemedText>
-          </ThemedView>
+            </View>
         ) : (
-          <View style={styles.messagesList}>
-            {messages.map((message) => (
-              <View
-                key={message.id}
-                style={[
-                  styles.messageContainer,
-                  isMyMessage(message) ? styles.myMessageContainer : styles.theirMessageContainer,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.messageBubble,
-                    isMyMessage(message) ? styles.myMessageBubble : styles.theirMessageBubble,
-                  ]}
+            messages.map(renderMessage)
+          )}
+        </ScrollView>
+
+        {/* Quick Replies */}
+        {showQuickReplies && quickReplies.length > 0 && (
+          <View style={styles.quickRepliesContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {quickReplies.map((reply, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.quickReplyBubble}
+                  onPress={() => sendMessage(reply)}
                 >
-                  {renderMessageContent(message)}
-                </View>
-                
-                <ThemedText style={[
-                  styles.messageTime,
-                  isMyMessage(message) ? styles.myMessageTime : styles.theirMessageTime,
-                ]}>
-                  {formatMessageTime(message.created_at)}
-                </ThemedText>
-              </View>
+                  <ThemedText style={styles.quickReplyText}>{reply}</ThemedText>
+                </TouchableOpacity>
             ))}
+            </ScrollView>
           </View>
         )}
-      </ScrollView>
 
-      <ThemedView style={styles.inputContainer}>
-        <TouchableOpacity style={styles.cameraButton} onPress={openCamera}>
+        {/* Message Input */}
+        <View style={styles.inputContainer}>
+          <TouchableOpacity 
+            style={styles.quickRepliesToggle}
+            onPress={() => setShowQuickReplies(!showQuickReplies)}
+          >
           <IconSymbol 
-            name="camera.fill"
-            size={20}
-            color={Colors[colorScheme ?? 'light'].tint}
+              name="sparkles" 
+              size={16} 
+              color={showQuickReplies ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
           />
         </TouchableOpacity>
         
+          <View style={styles.messageInputContainer}>
         <TextInput
-          style={[
-            styles.messageInput,
-            { color: Colors[colorScheme ?? 'light'].text }
-          ]}
-          placeholder="Message..."
-          placeholderTextColor={Colors[colorScheme ?? 'light'].text + '60'}
+              style={[styles.messageInput, { color: Colors[colorScheme ?? 'light'].text }]}
+              placeholder={LadCopy.MESSAGES.MESSAGE_PLACEHOLDER()}
+              placeholderTextColor={getLadColor(colorScheme, 'text', 'tertiary')}
           value={messageText}
-          onChangeText={setMessageText}
+              onChangeText={handleTyping}
           multiline
           maxLength={500}
         />
+          </View>
         
         <TouchableOpacity 
           style={[
             styles.sendButton,
-            (!messageText.trim() || isSending) && styles.sendButtonDisabled
+              (!messageText.trim() || sending) && styles.sendButtonDisabled
           ]}
-          onPress={sendMessage}
-          disabled={!messageText.trim() || isSending}
+            onPress={() => sendMessage()}
+            disabled={!messageText.trim() || sending}
         >
           <IconSymbol 
-            name="arrow.up"
-            size={20}
+              name={sending ? 'arrow.2.circlepath' : 'arrow.up.circle.fill'} 
+              size={24} 
             color="white"
           />
         </TouchableOpacity>
-      </ThemedView>
-
-      {/* Media Viewer Modal */}
-      <Modal
-        visible={viewingMedia !== null}
-        animationType="fade"
-        onRequestClose={closeMediaViewer}
-        statusBarTranslucent={true}
-      >
-        {viewingMedia && (
-          <View style={styles.mediaViewerContainer}>
-            <TouchableOpacity 
-              style={styles.mediaViewerCloseButton}
-              onPress={closeMediaViewer}
-            >
-              <IconSymbol name="xmark" size={24} color="white" />
-            </TouchableOpacity>
-            
-            <View style={styles.mediaViewerContent}>
-              {viewingMedia.media_type === 'photo' ? (
-                <Image 
-                  source={{ uri: viewingMedia.media_url }}
-                  style={styles.mediaViewerImage}
-                  resizeMode="contain"
-                />
-              ) : (
-                <View style={styles.videoPlaceholder}>
-                  <IconSymbol name="video.fill" size={64} color="white" />
-                  <ThemedText style={styles.videoPlaceholderText}>
-                    Video playback coming soon
-                  </ThemedText>
                 </View>
-              )}
-              
-              {viewingMedia.content && (
-                <View style={styles.mediaViewerCaption}>
-                  <ThemedText style={styles.mediaCaptionText}>
-                    {viewingMedia.content}
-                  </ThemedText>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-      </Modal>
     </KeyboardAvoidingView>
+
+      {renderPersonalityInsights()}
+    </SafeAreaView>
   );
 }
 
@@ -347,70 +549,131 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
     borderBottomColor: 'rgba(0,0,0,0.1)',
   },
   backButton: {
-    padding: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: `${LadColors.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerText: {
+    flex: 1,
   },
   headerTitle: {
-    flex: 1,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
   },
-  headerRight: {
-    width: 40,
+  headerSubtitle: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  insightsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: `${LadColors.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Chat Container
+  chatContainer: {
+    flex: 1,
   },
   messagesContainer: {
     flex: 1,
+  },
+  messagesContent: {
+    paddingVertical: 16,
     paddingHorizontal: 16,
   },
-  loadingState: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
   },
-  emptyState: {
+  loadingText: {
+    fontSize: 16,
+    opacity: 0.7,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
     paddingHorizontal: 40,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     marginTop: 16,
     marginBottom: 8,
-  },
-  emptyText: {
     textAlign: 'center',
-    opacity: 0.6,
-    lineHeight: 20,
   },
-  messagesList: {
-    paddingVertical: 20,
+  emptySubtitle: {
+    fontSize: 16,
+    opacity: 0.7,
+    textAlign: 'center',
+    lineHeight: 22,
   },
+  
+  // Messages
   messageContainer: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  myMessageContainer: {
-    alignItems: 'flex-end',
+  timestampContainer: {
+    alignItems: 'center',
+    marginVertical: 16,
   },
-  theirMessageContainer: {
-    alignItems: 'flex-start',
+  timestampText: {
+    fontSize: 12,
+    opacity: 0.6,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   messageBubble: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
     maxWidth: '80%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
+    position: 'relative',
   },
-  myMessageBubble: {
-    backgroundColor: '#007AFF',
+  myMessage: {
+    backgroundColor: LadColors.primary,
+    alignSelf: 'flex-end',
+    marginLeft: 48,
   },
-  theirMessageBubble: {
-    backgroundColor: 'rgba(0,0,0,0.05)',
+  theirMessage: {
+    backgroundColor: LadColors.social.otherPersonMessage,
+    alignSelf: 'flex-start',
+    marginRight: 48,
   },
   messageText: {
     fontSize: 16,
@@ -420,55 +683,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   theirMessageText: {
-    color: Colors.light.text,
-  },
-  messageTime: {
-    fontSize: 12,
-    opacity: 0.6,
-    marginTop: 4,
-  },
-  myMessageTime: {
-    textAlign: 'right',
-  },
-  theirMessageTime: {
-    textAlign: 'left',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  cameraButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  messageInput: {
-    flex: 1,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    maxHeight: 100,
-    marginRight: 8,
-  },
-  sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
+    color: '#000000',
   },
   mediaMessage: {
     flexDirection: 'row',
@@ -476,70 +691,180 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   mediaText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
   },
-  mediaCaptionText: {
-    fontSize: 14,
-    marginTop: 4,
-    fontStyle: 'italic',
+  messageStatus: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
   },
-  expiredMedia: {
+  
+  // Quick Replies
+  quickRepliesContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  quickReplyBubble: {
+    backgroundColor: `${LadColors.primary}15`,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  quickReplyText: {
+    color: LadColors.primary,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  
+  // Input
+  inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    opacity: 0.6,
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.1)',
   },
-  expiredMediaText: {
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  mediaViewerContainer: {
-    flex: 1,
-    backgroundColor: 'black',
+  quickRepliesToggle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 8,
   },
-  mediaViewerCloseButton: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    zIndex: 1,
+  messageInputContainer: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    maxHeight: 100,
+  },
+  messageInput: {
+    fontSize: 16,
+    maxHeight: 80,
+  },
+  sendButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: LadColors.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  mediaViewerContent: {
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+  
+  // Modal
+  modalContainer: {
     flex: 1,
-    justifyContent: 'center',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    width: '100%',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
   },
-  mediaViewerImage: {
-    width: '100%',
-    height: '70%',
+  modalCancel: {
+    fontSize: 16,
+    color: LadColors.primary,
   },
-  mediaViewerCaption: {
-    position: 'absolute',
-    bottom: 100,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  
+  // Insights
+  insightsHeader: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  insightsTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  insightsSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  insightCard: {
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 16,
     padding: 16,
+    marginBottom: 16,
+  },
+  insightHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  insightTrait: {
+    fontSize: 16,
+    fontWeight: '600',
+    flex: 1,
+  },
+  compatibilityScore: {
+    backgroundColor: LadColors.success,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 8,
   },
-  videoPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  videoPlaceholderText: {
+  scoreText: {
     color: 'white',
-    fontSize: 16,
-    marginTop: 16,
-    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  insightDescription: {
+    fontSize: 14,
+    opacity: 0.8,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  conversationTip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${LadColors.warning}15`,
+    padding: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  tipText: {
+    fontSize: 14,
+    flex: 1,
+    fontStyle: 'italic',
+  },
+  aiDisclaimer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 8,
+    marginBottom: 24,
+    gap: 8,
+  },
+  disclaimerText: {
+    fontSize: 12,
+    opacity: 0.7,
+    flex: 1,
+    lineHeight: 16,
   },
 }); 

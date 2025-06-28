@@ -6,17 +6,19 @@ Imports all database models to ensure they are registered with SQLAlchemy
 from .user import User
 from .story import Story
 from .snap import Snap
-from .hangout import Hangout
+from .hangout import Event, Hangout
 from .group_chat import GroupChat, GroupMessage
 from .venue import Venue, VenueReview
 from .direct_message import DirectMessage, Conversation
 from .friendship import FriendRequest, Friendship
+from .embeddings import UserEmbedding, GroupEmbedding, EventEmbedding, ChatActivity
 
 __all__ = [
     "User",
     "Story", 
     "Snap",
-    "Hangout",
+    "Event",
+    "Hangout",  # Backward compatibility alias
     "GroupChat",
     "GroupMessage",
     "Venue",
@@ -24,5 +26,9 @@ __all__ = [
     "DirectMessage",
     "Conversation",
     "FriendRequest",
-    "Friendship"
+    "Friendship",
+    "UserEmbedding",
+    "GroupEmbedding", 
+    "EventEmbedding",
+    "ChatActivity"
 ] 

@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LadChat API Test Interface</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+        .auth-status {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .logged-in { background: #d4edda; color: #155724; }
+        .logged-out { background: #f8d7da; color: #721c24; }
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .section-header {
+            background: #f8f9fa;
+            padding: 15px;
+            font-weight: bold;
+            font-size: 18px;
+            color: #495057;
+            border-bottom: 1px solid #ddd;
+        }
+        .section-content {
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
+        button.success { background: #28a745; }
+        button.success:hover { background: #218838; }
+        .response {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .response.success { background: #d4edda; color: #155724; }
+        .response.error { background: #f8d7da; color: #721c24; }
+        .inline-form {
+            display: flex;
+            gap: 10px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+        .inline-form .form-group {
+            margin-bottom: 0;
+            flex: 1;
+            min-width: 150px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .location-info {
+            background: #e7f3ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 LadChat API Test Interface</h1>
+            <p>Test all endpoints including RAG recommendations, notifications, and venue directory</p>
+        </div>
+
+        <div id="authStatus" class="auth-status logged-out">
+            Not authenticated - Please login first
+        </div>
+
+        <!-- Authentication Section -->
+        <div class="section">
+            <div class="section-header">🔐 Authentication</div>
+            <div class="section-content">
+                <div class="grid">
+                    <div>
+                        <h4>Register</h4>
+                        <div class="form-group">
+                            <label>Username:</label>
+                            <input type="text" id="regUsername" placeholder="johndoe">
+                        </div>
+                        <div class="form-group">
+                            <label>Email:</label>
+                            <input type="email" id="regEmail" placeholder="john@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Password:</label>
+                            <input type="password" id="regPassword" placeholder="password123">
+                        </div>
+                        <div class="form-group">
+                            <label>Bio (optional):</label>
+                            <input type="text" id="regBio" placeholder="Hey there, I'm new!">
+                        </div>
+                        <div class="form-group">
+                            <label>Interests (comma-separated):</label>
+                            <input type="text" id="regInterests" placeholder="soccer, gaming, music">
+                        </div>
+                        <button onclick="register()">Register</button>
+                    </div>
+                    <div>
+                        <h4>Login</h4>
+                        <div class="form-group">
+                            <label>Username or Email:</label>
+                            <input type="text" id="loginUsername" placeholder="johndoe or john@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Password:</label>
+                            <input type="password" id="loginPassword" placeholder="password123">
+                        </div>
+                        <button onclick="login()">Login</button>
+                        <button class="danger" onclick="logout()">Logout</button>
+                    </div>
+                </div>
+                <div id="authResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- User Profile Section -->
+        <div class="section">
+            <div class="section-header">👤 User Profile</div>
+            <div class="section-content">
+                <button onclick="getCurrentUser()">Get My Profile</button>
+                <div class="form-group">
+                    <label>Update Bio:</label>
+                    <input type="text" id="updateBio" placeholder="New bio text">
+                </div>
+                <div class="form-group">
+                    <label>Update Interests:</label>
+                    <input type="text" id="updateInterests" placeholder="soccer, gaming, music">
+                </div>
+                <button onclick="updateProfile()">Update Profile</button>
+                <div id="profileResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Location Helper -->
+        <div class="section">
+            <div class="section-header">📍 Location Helper</div>
+            <div class="section-content">
+                <div class="location-info" id="locationInfo">
+                    Click "Get My Location" to enable location-based features (recommendations, events, venues)
+                </div>
+                <button onclick="getCurrentLocation()">Get My Location</button>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>Manual Latitude:</label>
+                        <input type="number" id="manualLat" placeholder="40.7128" step="any">
+                    </div>
+                    <div class="form-group">
+                        <label>Manual Longitude:</label>
+                        <input type="number" id="manualLng" placeholder="-74.0060" step="any">
+                    </div>
+                    <button onclick="setManualLocation()">Set Location</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Recommendations Section -->
+        <div class="section">
+            <div class="section-header">🤖 AI Recommendations (RAG System)</div>
+            <div class="section-content">
+                <div class="grid">
+                    <div>
+                        <h4>Friend Recommendations</h4>
+                        <div class="form-group">
+                            <label>Limit:</label>
+                            <input type="number" id="friendLimit" value="10" min="1" max="20">
+                        </div>
+                        <button onclick="getFriendRecommendations()">Get Friend Recommendations</button>
+                    </div>
+                    <div>
+                        <h4>Event Recommendations</h4>
+                        <div class="form-group">
+                            <label>Limit:</label>
+                            <input type="number" id="eventLimit" value="10" min="1" max="20">
+                        </div>
+                        <button onclick="getEventRecommendations()">Get Event Recommendations</button>
+                        <p style="font-size: 12px; color: #666;">Requires location data</p>
+                    </div>
+                </div>
+                <div id="recommendationsResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Notifications Section -->
+        <div class="section">
+            <div class="section-header">🔔 Notifications System</div>
+            <div class="section-content">
+                <button onclick="getChatSummary()">Get Chat Summary (Unread Messages)</button>
+                <button onclick="getTotalUnreadCount()">Get Total Unread Count</button>
+                
+                <h4>Mark Chat as Opened</h4>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>Chat Type:</label>
+                        <select id="chatType">
+                            <option value="direct">Direct</option>
+                            <option value="group">Group</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Chat ID:</label>
+                        <input type="number" id="chatId" placeholder="1">
+                    </div>
+                    <button onclick="markChatOpened()">Mark as Opened</button>
+                </div>
+                <div id="notificationsResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Venues Section -->
+        <div class="section">
+            <div class="section-header">🏢 Venues (Third Space Directory)</div>
+            <div class="section-content">
+                <h4>Search Venues</h4>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>Category:</label>
+                        <select id="venueCategory">
+                            <option value="">All Categories</option>
+                            <option value="bar">Bar</option>
+                            <option value="restaurant">Restaurant</option>
+                            <option value="cafe">Cafe</option>
+                            <option value="park">Park</option>
+                            <option value="gym">Gym</option>
+                            <option value="sports_bar">Sports Bar</option>
+                            <option value="brewery">Brewery</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Search:</label>
+                        <input type="text" id="venueSearch" placeholder="venue name">
+                    </div>
+                    <div class="form-group">
+                        <label>Radius (miles):</label>
+                        <input type="number" id="venueRadius" value="10" min="0.1" max="50" step="0.1">
+                    </div>
+                    <button onclick="searchVenues()">Search Venues</button>
+                </div>
+                
+                <h4>Venue Review</h4>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>Venue ID:</label>
+                        <input type="number" id="reviewVenueId" placeholder="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Rating (1-5):</label>
+                        <input type="number" id="venueRating" min="1" max="5" value="5">
+                    </div>
+                    <div class="form-group">
+                        <label>Lad Rating (1-5):</label>
+                        <input type="number" id="venueLadRating" min="1" max="5" value="4">
+                    </div>
+                    <button onclick="createVenueReview()">Create Review</button>
+                </div>
+                <div id="venuesResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Friends Section -->
+        <div class="section">
+            <div class="section-header">👥 Friends</div>
+            <div class="section-content">
+                <button onclick="getFriends()">Get My Friends</button>
+                <button onclick="getFriendRequests()">Get Friend Requests</button>
+                
+                <h4>Send Friend Request</h4>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>User ID:</label>
+                        <input type="number" id="friendUserId" placeholder="2">
+                    </div>
+                    <div class="form-group">
+                        <label>Message:</label>
+                        <input type="text" id="friendMessage" placeholder="Let's be friends!">
+                    </div>
+                    <button onclick="sendFriendRequest()">Send Request</button>
+                </div>
+                <div id="friendsResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Events Section -->
+        <div class="section">
+            <div class="section-header">🎉 Events</div>
+            <div class="section-content">
+                <button onclick="getEvents()">Get Events Near Me</button>
+                
+                <h4>Create Event</h4>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>Title:</label>
+                            <input type="text" id="eventTitle" placeholder="Soccer Pickup Game">
+                        </div>
+                        <div class="form-group">
+                            <label>Description:</label>
+                            <textarea id="eventDescription" placeholder="Casual game at the park"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Location Name:</label>
+                            <input type="text" id="eventLocation" placeholder="Central Park">
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label>Start Time:</label>
+                            <input type="datetime-local" id="eventStartTime">
+                        </div>
+                        <div class="form-group">
+                            <label>End Time:</label>
+                            <input type="datetime-local" id="eventEndTime">
+                        </div>
+                        <div class="form-group">
+                            <label>Visibility:</label>
+                            <select id="eventVisibility">
+                                <option value="public">Public</option>
+                                <option value="friends">Friends</option>
+                                <option value="private">Private</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="createEvent()">Create Event</button>
+                
+                <h4>RSVP to Event</h4>
+                <div class="inline-form">
+                    <div class="form-group">
+                        <label>Event ID:</label>
+                        <input type="number" id="rsvpEventId" placeholder="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Status:</label>
+                        <select id="rsvpStatus">
+                            <option value="yes">Yes</option>
+                            <option value="maybe">Maybe</option>
+                            <option value="no">No</option>
+                        </select>
+                    </div>
+                    <button onclick="rsvpToEvent()">RSVP</button>
+                </div>
+                <div id="eventsResponse" class="response"></div>
+            </div>
+        </div>
+
+        <!-- Quick Test Section -->
+        <div class="section">
+            <div class="section-header">⚡ Quick Tests</div>
+            <div class="section-content">
+                <button onclick="runHealthCheck()">Health Check</button>
+                <button onclick="testAllRecommendations()">Test All AI Recommendations</button>
+                <button onclick="testNotificationFlow()">Test Notification Flow</button>
+                <button onclick="testVenueFlow()">Test Venue Flow</button>
+                <div id="quickTestResponse" class="response"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let authToken = localStorage.getItem('ladchat_token');
+        let userLocation = { lat: null, lng: null };
+
+        // Update auth status display
+        function updateAuthStatus() {
+            const statusEl = document.getElementById('authStatus');
+            if (authToken) {
+                statusEl.className = 'auth-status logged-in';
+                statusEl.textContent = 'Authenticated ✓';
+            } else {
+                statusEl.className = 'auth-status logged-out';
+                statusEl.textContent = 'Not authenticated - Please login first';
+            }
+        }
+
+        // Initialize
+        updateAuthStatus();
+
+        // Helper function to make API calls
+        async function apiCall(endpoint, method = 'GET', body = null, requiresAuth = true) {
+            const headers = {
+                'Content-Type': 'application/json',
+            };
+
+            if (requiresAuth && authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
+            const config = {
+                method,
+                headers,
+            };
+
+            if (body) {
+                config.body = JSON.stringify(body);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, config);
+                const data = await response.json();
+                return { success: response.ok, data, status: response.status };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        }
+
+        // Display response in UI
+        function displayResponse(elementId, response) {
+            const el = document.getElementById(elementId);
+            el.className = `response ${response.success ? 'success' : 'error'}`;
+            el.textContent = JSON.stringify(response, null, 2);
+        }
+
+        // Auth functions
+        async function register() {
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const bio = document.getElementById('regBio').value;
+            const interests = document.getElementById('regInterests').value
+                .split(',').map(i => i.trim()).filter(i => i);
+
+            const body = { username, email, password };
+            if (bio) body.bio = bio;
+            if (interests.length) body.interests = interests;
+
+            const response = await apiCall('/auth/register', 'POST', body, false);
+            if (response.success && response.data.access_token) {
+                authToken = response.data.access_token;
+                localStorage.setItem('ladchat_token', authToken);
+                updateAuthStatus();
+            }
+            displayResponse('authResponse', response);
+        }
+
+        async function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+
+            const response = await apiCall('/auth/login', 'POST', { username, password }, false);
+            if (response.success && response.data.access_token) {
+                authToken = response.data.access_token;
+                localStorage.setItem('ladchat_token', authToken);
+                updateAuthStatus();
+            }
+            displayResponse('authResponse', response);
+        }
+
+        function logout() {
+            authToken = null;
+            localStorage.removeItem('ladchat_token');
+            updateAuthStatus();
+            displayResponse('authResponse', { success: true, message: 'Logged out locally' });
+        }
+
+        // Location functions
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLocation.lat = position.coords.latitude;
+                        userLocation.lng = position.coords.longitude;
+                        updateLocationInfo();
+                    },
+                    (error) => {
+                        document.getElementById('locationInfo').innerHTML = 
+                            `<strong>Location Error:</strong> ${error.message}. Please use manual coordinates.`;
+                    }
+                );
+            } else {
+                document.getElementById('locationInfo').innerHTML = 
+                    '<strong>Geolocation not supported.</strong> Please use manual coordinates.';
+            }
+        }
+
+        function setManualLocation() {
+            const lat = parseFloat(document.getElementById('manualLat').value);
+            const lng = parseFloat(document.getElementById('manualLng').value);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                userLocation.lat = lat;
+                userLocation.lng = lng;
+                updateLocationInfo();
+            }
+        }
+
+        function updateLocationInfo() {
+            document.getElementById('locationInfo').innerHTML = 
+                `<strong>Current Location:</strong> ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)} ✓`;
+        }
+
+        // Profile functions - FIXED: Using correct /auth/me endpoint
+        async function getCurrentUser() {
+            const response = await apiCall('/auth/me');
+            displayResponse('profileResponse', response);
+        }
+
+        async function updateProfile() {
+            const bio = document.getElementById('updateBio').value;
+            const interests = document.getElementById('updateInterests').value
+                .split(',').map(i => i.trim()).filter(i => i);
+
+            const body = {};
+            if (bio) body.bio = bio;
+            if (interests.length) body.interests = interests;
+
+            const response = await apiCall('/auth/me', 'PUT', body);
+            displayResponse('profileResponse', response);
+        }
+
+        // Recommendation functions
+        async function getFriendRecommendations() {
+            const limit = document.getElementById('friendLimit').value;
+            const response = await apiCall(`/recommendations/friends?limit=${limit}`);
+            displayResponse('recommendationsResponse', response);
+        }
+
+        async function getEventRecommendations() {
+            if (!userLocation.lat || !userLocation.lng) {
+                displayResponse('recommendationsResponse', {
+                    success: false,
+                    error: 'Location required for event recommendations'
+                });
+                return;
+            }
+
+            const limit = document.getElementById('eventLimit').value;
+            const response = await apiCall(
+                `/recommendations/events?latitude=${userLocation.lat}&longitude=${userLocation.lng}&limit=${limit}`
+            );
+            displayResponse('recommendationsResponse', response);
+        }
+
+        // Notification functions
+        async function getChatSummary() {
+            const response = await apiCall('/notifications/chat-summary');
+            displayResponse('notificationsResponse', response);
+        }
+
+        async function getTotalUnreadCount() {
+            const response = await apiCall('/notifications/unread-count');
+            displayResponse('notificationsResponse', response);
+        }
+
+        async function markChatOpened() {
+            const chatType = document.getElementById('chatType').value;
+            const chatId = parseInt(document.getElementById('chatId').value);
+
+            const response = await apiCall('/notifications/mark-chat-opened', 'POST', {
+                chat_type: chatType,
+                chat_id: chatId
+            });
+            displayResponse('notificationsResponse', response);
+        }
+
+        // Venue functions
+        async function searchVenues() {
+            let url = '/venues?';
+            
+            if (userLocation.lat && userLocation.lng) {
+                url += `latitude=${userLocation.lat}&longitude=${userLocation.lng}&`;
+            }
+
+            const category = document.getElementById('venueCategory').value;
+            const search = document.getElementById('venueSearch').value;
+            const radius = document.getElementById('venueRadius').value;
+
+            if (category) url += `category=${category}&`;
+            if (search) url += `search=${encodeURIComponent(search)}&`;
+            if (radius) url += `radius_miles=${radius}&`;
+
+            const response = await apiCall(url.slice(0, -1)); // Remove trailing &
+            displayResponse('venuesResponse', response);
+        }
+
+        async function createVenueReview() {
+            const venueId = document.getElementById('reviewVenueId').value;
+            const rating = parseInt(document.getElementById('venueRating').value);
+            const ladRating = parseInt(document.getElementById('venueLadRating').value);
+
+            const response = await apiCall(`/venues/${venueId}/reviews`, 'POST', {
+                rating,
+                lad_friendly_rating: ladRating,
+                title: 'Test Review',
+                content: 'This is a test review from the API interface'
+            });
+            displayResponse('venuesResponse', response);
+        }
+
+        // Friend functions - FIXED: Using correct endpoints
+        async function getFriends() {
+            const response = await apiCall('/friends/list');
+            displayResponse('friendsResponse', response);
+        }
+
+        async function getFriendRequests() {
+            const response = await apiCall('/friends/requests');
+            displayResponse('friendsResponse', response);
+        }
+
+        async function sendFriendRequest() {
+            const userId = parseInt(document.getElementById('friendUserId').value);
+            const message = document.getElementById('friendMessage').value;
+
+            const body = { recipient_id: userId };
+            if (message) body.message = message;
+
+            const response = await apiCall('/friends/request', 'POST', body);
+            displayResponse('friendsResponse', response);
+        }
+
+        // Event functions
+        async function getEvents() {
+            let url = '/events?';
+            if (userLocation.lat && userLocation.lng) {
+                url += `latitude=${userLocation.lat}&longitude=${userLocation.lng}`;
+            }
+
+            const response = await apiCall(url);
+            displayResponse('eventsResponse', response);
+        }
+
+        async function createEvent() {
+            const title = document.getElementById('eventTitle').value;
+            const description = document.getElementById('eventDescription').value;
+            const location = document.getElementById('eventLocation').value;
+            const startTime = document.getElementById('eventStartTime').value;
+            const endTime = document.getElementById('eventEndTime').value;
+            const visibility = document.getElementById('eventVisibility').value;
+
+            if (!userLocation.lat || !userLocation.lng) {
+                displayResponse('eventsResponse', {
+                    success: false,
+                    error: 'Location required for event creation'
+                });
+                return;
+            }
+
+            const response = await apiCall('/events', 'POST', {
+                title,
+                description,
+                location_name: location,
+                latitude: userLocation.lat,
+                longitude: userLocation.lng,
+                creator_latitude: userLocation.lat,  // Required: Creator's current location
+                creator_longitude: userLocation.lng, // Required: Creator's current location
+                start_time: new Date(startTime).toISOString(),
+                end_time: new Date(endTime).toISOString(),
+                visibility
+            });
+            displayResponse('eventsResponse', response);
+        }
+
+        async function rsvpToEvent() {
+            const eventId = document.getElementById('rsvpEventId').value;
+            const status = document.getElementById('rsvpStatus').value;
+
+            const response = await apiCall(`/events/${eventId}/rsvp`, 'POST', { status });
+            displayResponse('eventsResponse', response);
+        }
+
+        // Quick test functions
+        async function runHealthCheck() {
+            const response = await apiCall('/health', 'GET', null, false);
+            displayResponse('quickTestResponse', response);
+        }
+
+        async function testAllRecommendations() {
+            if (!authToken) {
+                displayResponse('quickTestResponse', {
+                    success: false,
+                    error: 'Please login first'
+                });
+                return;
+            }
+
+            const results = {};
+
+            // Test friend recommendations
+            const friendRec = await apiCall('/recommendations/friends?limit=5');
+            results.friendRecommendations = friendRec;
+
+            // Test event recommendations (if location available)
+            if (userLocation.lat && userLocation.lng) {
+                const eventRec = await apiCall(
+                    `/recommendations/events?latitude=${userLocation.lat}&longitude=${userLocation.lng}&limit=5`
+                );
+                results.eventRecommendations = eventRec;
+            } else {
+                results.eventRecommendations = { success: false, error: 'No location data' };
+            }
+
+            displayResponse('quickTestResponse', {
+                success: true,
+                message: 'All AI recommendation tests completed',
+                results
+            });
+        }
+
+        async function testNotificationFlow() {
+            if (!authToken) {
+                displayResponse('quickTestResponse', {
+                    success: false,
+                    error: 'Please login first'
+                });
+                return;
+            }
+
+            const results = {};
+
+            // Get chat summary
+            const chatSummary = await apiCall('/notifications/chat-summary');
+            results.chatSummary = chatSummary;
+
+            // Get unread count
+            const unreadCount = await apiCall('/notifications/unread-count');
+            results.unreadCount = unreadCount;
+
+            displayResponse('quickTestResponse', {
+                success: true,
+                message: 'Notification flow tests completed',
+                results
+            });
+        }
+
+        async function testVenueFlow() {
+            if (!authToken) {
+                displayResponse('quickTestResponse', {
+                    success: false,
+                    error: 'Please login first'
+                });
+                return;
+            }
+
+            const results = {};
+
+            // Get venue categories
+            const categories = await apiCall('/venues/categories/list');
+            results.categories = categories;
+
+            // Search venues
+            let searchUrl = '/venues?limit=5';
+            if (userLocation.lat && userLocation.lng) {
+                searchUrl += `&latitude=${userLocation.lat}&longitude=${userLocation.lng}`;
+            }
+            const venues = await apiCall(searchUrl);
+            results.venueSearch = venues;
+
+            displayResponse('quickTestResponse', {
+                success: true,
+                message: 'Venue flow tests completed',
+                results
+            });
+        }
+
+        // Set default datetime values
+        const now = new Date();
+        const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        document.getElementById('eventStartTime').value = tomorrow.toISOString().slice(0, 16);
+        document.getElementById('eventEndTime').value = new Date(tomorrow.getTime() + 2 * 60 * 60 * 1000).toISOString().slice(0, 16);
+    </script>
+</body>
+</html> 
