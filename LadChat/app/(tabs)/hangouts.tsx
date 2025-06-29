@@ -12,7 +12,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { LadColors, Colors, getLadColor } from '@/constants/Colors';
 import { LadCopy } from '@/utils/LadCopy';
 import * as Location from 'expo-location';
-import { Event, EventCreateData, EventFilters, GroupChat } from '@/services/api';
+import { Event, EventCreateData, EventFilters, GroupChat, EventRecommendation } from '@/services/api';
 import apiClient from '@/services/api';
 
 interface CreateEventModalProps {
@@ -201,7 +201,7 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({ visible, onClose, o
         const responseData = response.data;
         // Handle nested event structure or direct event data
         const newEvent = responseData?.event || responseData;
-        const eventId = newEvent?.id;
+        const eventId = (newEvent as any)?.id || (newEvent as any)?.event?.id;
         
         if (eventId) {
           Alert.alert('Success', 'Event created successfully!');
@@ -440,7 +440,7 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({ visible, onClose, o
               <View style={styles.dropdownRow}>
                 <ThemedText style={styles.dropdownLabel}>Duration</ThemedText>
                 <View style={styles.dropdownButtonContainer}>
-                  {[1, 2, 3, 4, 5, 6, 8].map((hours) => (
+                  {[1, 2, 3, 4, 5, 6].map((hours) => (
                     <TouchableOpacity
                       key={hours}
                       style={[
@@ -623,9 +623,9 @@ const EventCard: React.FC<EventCardProps> = ({ event, onRSVP, onPress }) => {
           <IconSymbol name="person.2" size={14} color={Colors[colorScheme ?? 'light'].icon} />
           <ThemedText style={styles.eventDetailText}>
             {event.attendee_count} going
-            {event.maybe_count > 0 && `, ${event.maybe_count} maybe`}
-            {event.friend_attendee_count !== undefined && event.friend_attendee_count > 0 && 
-              ` (${event.friend_attendee_count} friends)`}
+            {event.maybe_count > 0 ? `, ${event.maybe_count} maybe` : ''}
+            {event.friend_attendee_count !== undefined && event.friend_attendee_count > 0 
+              ? ` (${event.friend_attendee_count} friends)` : ''}
           </ThemedText>
         </View>
       </View>
@@ -925,7 +925,7 @@ const EventDetailModal: React.FC<{ event: Event | null; visible: boolean; onClos
                   <ThemedText style={styles.eventInfoLabel}>Who's Going</ThemedText>
                   <ThemedText style={styles.eventInfoValue}>
                     {event.attendee_count} confirmed
-                    {event.maybe_count > 0 && `, ${event.maybe_count} maybe`}
+                    {event.maybe_count > 0 ? `, ${event.maybe_count} maybe` : ''}
                   </ThemedText>
                   {event.friend_attendee_count !== undefined && event.friend_attendee_count > 0 && (
                     <ThemedText style={styles.eventInfoSubtext}>
@@ -1065,7 +1065,7 @@ export default function EventsScreen() {
       const response = await apiClient.getEvents(filters);
       if (response.success && response.data) {
         // Filter out events where user RSVP'd "no"
-        const filteredEvents = (response.data.events || []).filter(event => 
+        const filteredEvents = (response.data.events || []).filter((event: any) => 
           event.user_rsvp?.status !== 'no'
         );
         setEvents(filteredEvents);
@@ -1117,25 +1117,45 @@ export default function EventsScreen() {
     }
     setLoadingRecommendations(true);
     try {
-      const response = await apiClient.getEventRecommendations(userLocation.latitude, userLocation.longitude);
-      if (response.success && response.data?.recommendations) {
-        setEventRecommendations(response.data.recommendations);
-        if (response.data.recommendations.length === 0) {
+      console.log('🤖 AI RECOMMENDATIONS - Requesting recommendations...');
+      const response = await apiClient.getEventRecommendations(userLocation.latitude, userLocation.longitude, 3);
+      console.log('🤖 AI RECOMMENDATIONS - Response:', response);
+      
+      if (response.success && response.data) {
+        // Handle nested response structure: response.data.data contains the actual recommendations
+        const recommendations = Array.isArray(response.data.data) ? response.data.data : (Array.isArray(response.data) ? response.data : []);
+        console.log('🤖 AI RECOMMENDATIONS - Setting recommendations:', recommendations);
+        setEventRecommendations(recommendations);
+        
+        if (recommendations.length === 0) {
           Alert.alert('No Recommendations', 'We couldn\'t find any event recommendations nearby. Try again later!');
         }
       } else {
+        console.log('❌ AI RECOMMENDATIONS - Failed:', response.error);
         Alert.alert('Error', response.error || 'Failed to get recommendations.');
       }
     } catch (error) {
+      console.error('❌ AI RECOMMENDATIONS - Exception:', error);
       Alert.alert('Error', 'An unexpected error occurred while fetching recommendations.');
     } finally {
       setLoadingRecommendations(false);
     }
   };
 
-  const createEventFromRecommendation = (rec: any) => {
-    // TODO: Pre-fill create event modal with recommendation data
-    Alert.alert('Create Event', `This will pre-fill the event creation form for: ${rec.title}`);
+  const openRecommendedEvent = async (rec: EventRecommendation) => {
+    try {
+      // Fetch the full event details using the event_id
+      const response = await apiClient.getEvent(rec.event_id);
+      if (response.success && response.data) {
+        // Open the event detail modal with the full event data
+        setSelectedEvent(response.data);
+      } else {
+        Alert.alert('Error', 'Could not load event details');
+      }
+    } catch (error) {
+      console.error('Error loading recommended event:', error);
+      Alert.alert('Error', 'Failed to load event details');
+    }
   };
 
   const renderFilterTabs = () => (
@@ -1259,17 +1279,27 @@ export default function EventsScreen() {
               <TouchableOpacity
                 key={index}
                 style={styles.recommendationCard}
-                onPress={() => createEventFromRecommendation(rec)}
+                onPress={() => openRecommendedEvent(rec)}
               >
-                <IconSymbol name={rec.icon} size={20} color={LadColors.primary} />
+                <IconSymbol name="calendar" size={20} color={LadColors.primary} />
                 <ThemedText style={styles.recommendationTitle}>{rec.title}</ThemedText>
-                <ThemedText style={styles.recommendationSubtitle}>{rec.description}</ThemedText>
+                <ThemedText style={styles.recommendationSubtitle}>{rec.location_name}</ThemedText>
+                <ThemedText style={styles.recommendationReason} numberOfLines={2}>
+                  {rec.reason}
+                </ThemedText>
                 <View style={styles.recommendationTags}>
-                  {rec.tags?.slice(0, 2).map((tag: string, i: number) => (
-                    <View key={i} style={styles.recommendationTag}>
-                      <ThemedText style={styles.recommendationTagText}>{tag}</ThemedText>
+                  <View style={styles.recommendationTag}>
+                    <ThemedText style={styles.recommendationTagText}>
+                      {100 - Math.round(Math.abs(rec.similarity_score) * 100)}% match
+                    </ThemedText>
+                  </View>
+                  {rec.distance_miles && (
+                    <View style={styles.recommendationTag}>
+                      <ThemedText style={styles.recommendationTagText}>
+                        {rec.distance_miles.toFixed(1)} mi
+                      </ThemedText>
                     </View>
-                  ))}
+                  )}
                 </View>
               </TouchableOpacity>
             ))}
@@ -1780,7 +1810,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.7,
     marginTop: 2,
-    height: 30,
+  },
+  recommendationReason: {
+    fontSize: 11,
+    opacity: 0.8,
+    fontStyle: 'italic',
+    marginTop: 4,
+    lineHeight: 14,
   },
   recommendationTags: {
     flexDirection: 'row',
@@ -1914,6 +1950,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     maxHeight: '80%',
     minHeight: '50%',
+    width: '100%',
   },
   bottomSheetHandle: {
     width: 36,
@@ -1949,6 +1986,7 @@ const styles = StyleSheet.create({
   bottomSheetContent: {
     flex: 1,
     paddingHorizontal: 20,
+    width: '100%',
   },
   eventDescriptionContainer: {
     marginBottom: 24,

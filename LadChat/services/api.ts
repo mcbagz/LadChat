@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // API Configuration
-const API_BASE_URL = 'https://ladchat.bagztech.com'; /*__DEV__ 
-  ? 'http://192.168.0.14:8000'  // Development
-  : 'https://api.ladchat.com'; // Production*/
+const API_BASE_URL = __DEV__ 
+  ? 'https://ladchat.bagztech.com'  // Development
+  : 'https://api.ladchat.com'; // Production
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -831,20 +831,20 @@ class ApiClient {
   }
 
   // Recommendations
-  async getFriendRecommendations(limit: number = 10): Promise<ApiResponse<FriendRecommendation[]>> {
-    const params = new URLSearchParams({
-      limit: limit.toString(),
-    });
-    return this.makeRequest(`/recommendations/friends?${params.toString()}`);
-  }
-
-  async getEventRecommendations(latitude: number, longitude: number, limit: number = 10): Promise<ApiResponse<{ recommendations: EventRecommendation[] }>> {
+  async getEventRecommendations(latitude: number, longitude: number, limit: number = 10): Promise<ApiResponse<{ data: EventRecommendation[]; message: string }>> {
     const params = new URLSearchParams({
       latitude: latitude.toString(),
       longitude: longitude.toString(),
       limit: limit.toString(),
     });
     return this.makeRequest(`/recommendations/events?${params.toString()}`);
+  }
+
+  async getFriendRecommendations(limit: number = 10): Promise<ApiResponse<FriendRecommendation[]>> {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+    });
+    return this.makeRequest(`/recommendations/friends?${params.toString()}`);
   }
 }
 

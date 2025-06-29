@@ -4,7 +4,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
+import { Colors, LadColors } from '@/constants/Colors';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -78,9 +78,9 @@ export default function LoginScreen() {
             </TouchableOpacity>
             
             <View style={styles.headerContent}>
-              <ThemedText style={styles.title}>Welcome Back</ThemedText>
+              <ThemedText style={styles.brandTitle}>LadChat</ThemedText>
               <ThemedText style={styles.subtitle}>
-                Sign in to continue your journey
+                Keep in touch with the crew
               </ThemedText>
             </View>
           </View>
@@ -141,7 +141,7 @@ export default function LoginScreen() {
             <TouchableOpacity 
               style={[
                 styles.loginButton, 
-                { backgroundColor: Colors[colorScheme ?? 'light'].tint },
+                { backgroundColor: LadColors.primary },
                 isLoading && styles.disabledButton
               ]}
               onPress={handleLogin}
@@ -155,21 +155,25 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.forgotPassword}>
-              <ThemedText style={[styles.forgotPasswordText, { color: Colors[colorScheme ?? 'light'].tint }]}>
+              <ThemedText style={[styles.forgotPasswordText, { color: LadColors.primary }]}>
                 Forgot Password?
               </ThemedText>
             </TouchableOpacity>
           </View>
 
           <View style={styles.bottomSection}>
-            <TouchableOpacity style={styles.signupLink} onPress={handleSignup}>
-              <ThemedText style={styles.signupLinkText}>
-                Don't have an account?{' '}
-                <ThemedText style={[styles.signupLinkTextBold, { color: Colors[colorScheme ?? 'light'].tint }]}>
-                  Sign Up
-                </ThemedText>
+            <View style={styles.signupCard}>
+              <ThemedText style={styles.signupCardTitle}>New to LadChat?</ThemedText>
+              <ThemedText style={styles.signupCardSubtitle}>
+                Join thousands of guys building real friendships and authentic connections
               </ThemedText>
-            </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.signupButton, { backgroundColor: LadColors.primary }]} 
+                onPress={handleSignup}
+              >
+                <ThemedText style={styles.signupButtonText}>Create Your Account</ThemedText>
+              </TouchableOpacity>
+            </View>
           </View>
         </ThemedView>
       </ScrollView>
@@ -201,8 +205,14 @@ const styles = StyleSheet.create({
   headerContent: {
     alignItems: 'center',
   },
+  brandTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: LadColors.primary,
+    marginBottom: 8,
+  },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
   },
@@ -210,6 +220,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     opacity: 0.7,
     textAlign: 'center',
+    lineHeight: 22,
   },
   form: {
     flex: 1,
@@ -265,14 +276,34 @@ const styles = StyleSheet.create({
   bottomSection: {
     marginTop: 'auto',
   },
-  signupLink: {
+  signupCard: {
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
+  signupCardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  signupCardSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  signupButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    paddingVertical: 16,
   },
-  signupLinkText: {
+  signupButtonText: {
+    color: 'white',
     fontSize: 16,
-  },
-  signupLinkTextBold: {
     fontWeight: '600',
   },
 }); 
