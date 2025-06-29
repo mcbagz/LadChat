@@ -28,7 +28,7 @@ type TabType = 'chats' | 'discover' | 'requests';
 
 interface FriendRequest {
   id: number;
-  requester: {
+  sender: {
     id: number;
     username: string;
     bio?: string;
@@ -46,6 +46,12 @@ interface UserSearchResult {
   interests: string[];
   is_verified: boolean;
   friendship_status: 'none' | 'friends' | 'request_sent' | 'request_received';
+  // Additional fields for AI recommendations
+  similarity_score?: number;
+  mutual_friends_count?: number;
+  reason?: string;
+  bio?: string;
+  profile_photo_url?: string;
 }
 
 interface Friend {
@@ -77,7 +83,7 @@ export default function FriendsScreen() {
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [showSearchResults, setShowSearchResults] = useState(false); // Control when to show results
   const [friends, setFriends] = useState<Friend[]>([]);
-  const [aiRecommendations, setAiRecommendations] = useState<FriendRecommendation[]>([]);
+  const [aiRecommendations, setAiRecommendations] = useState<UserSearchResult[]>([]);
   
   // Requests tab state
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -145,7 +151,7 @@ export default function FriendsScreen() {
       
       // Process direct conversations
       if (conversationsResponse.success && conversationsResponse.data) {
-        const conversationsData = Array.isArray(conversationsResponse.data) ? conversationsResponse.data : (conversationsResponse.data.data || []);
+        const conversationsData = Array.isArray(conversationsResponse.data) ? conversationsResponse.data : ((conversationsResponse.data as any).data || []);
         
         const transformedConversations = conversationsData.map((conv: any) => {
           const transformed = {
@@ -171,7 +177,7 @@ export default function FriendsScreen() {
       
       // Process group chats
       if (groupsResponse.success && groupsResponse.data) {
-        const groupsData = groupsResponse.data.groups || groupsResponse.data.data || groupsResponse.data;
+        const groupsData = (groupsResponse.data as any).groups || (groupsResponse.data as any).data || groupsResponse.data;
         
         if (Array.isArray(groupsData)) {
           const transformedGroups = groupsData.map((group: any) => {
@@ -216,7 +222,7 @@ export default function FriendsScreen() {
       
       // Merge unread counts from chat summary if available
       if (chatSummaryResponse.success && chatSummaryResponse.data) {
-        const unreadData = Array.isArray(chatSummaryResponse.data) ? chatSummaryResponse.data : (chatSummaryResponse.data.data || []);
+        const unreadData = Array.isArray(chatSummaryResponse.data) ? chatSummaryResponse.data : ((chatSummaryResponse.data as any).data || []);
         
         const conversationsWithUnread = allConversations.map((conv: any) => {
           const unreadConv = unreadData.find((u: any) => 
@@ -279,6 +285,8 @@ export default function FriendsScreen() {
         const actualData = response.data.data || response.data;
         const requestsData = Array.isArray(actualData) ? actualData : [];
         console.log('✅ FRIEND REQUESTS DEBUG - Processed requests data:', requestsData);
+        console.log('✅ FRIEND REQUESTS DEBUG - First request sender:', requestsData[0]?.sender);
+        console.log('✅ FRIEND REQUESTS DEBUG - Profile photo URL:', requestsData[0]?.sender?.profile_photo_url);
         setFriendRequests(requestsData);
       } else {
         console.log('❌ FRIEND REQUESTS DEBUG - Failed to load. Success:', response.success, 'Data:', response.data, 'Error:', response.error);
@@ -327,20 +335,51 @@ export default function FriendsScreen() {
     setIsLoadingAI(true);
     try {
       console.log('🤖 AI RECOMMENDATIONS - Loading friend recommendations...');
-      const response = await apiClient.getFriendRecommendations(10);
+      const response = await apiClient.getFriendRecommendations(4);
+      
+      console.log('🔍 AI RECOMMENDATIONS - Full response:', response);
+      console.log('🔍 AI RECOMMENDATIONS - Response success:', response.success);
+      console.log('🔍 AI RECOMMENDATIONS - Response data type:', typeof response.data);
+      console.log('🔍 AI RECOMMENDATIONS - Response data:', response.data);
       
       if (response.success && response.data) {
-        // Handle direct array response from the API
-        const recommendationsData = Array.isArray(response.data) ? response.data : [];
+        // Handle both possible response structures
+        const apiData = response.data as any;
+        const recommendationsData = Array.isArray(apiData) ? apiData : (Array.isArray(apiData.data) ? apiData.data : []);
         console.log('✅ AI RECOMMENDATIONS - Got recommendations:', recommendationsData);
-        setAiRecommendations(recommendationsData);
+        console.log('✅ AI RECOMMENDATIONS - Recommendations count:', recommendationsData.length);
+        
+        // Transform the AI recommendations to match UserSearchResult interface
+        const transformedRecommendations = recommendationsData.map((rec: any) => ({
+          id: rec.user_id,
+          username: rec.username,
+          interests: rec.interests || [],
+          is_verified: false, // API doesn't return this for recommendations
+          friendship_status: 'none' as const,
+          // Additional recommendation data
+          similarity_score: rec.similarity_score,
+          mutual_friends_count: rec.mutual_friends_count,
+          reason: rec.reason,
+          bio: rec.bio,
+          profile_photo_url: rec.profile_photo_url
+        }));
+        
+        console.log('🔄 AI RECOMMENDATIONS - Transformed recommendations:', transformedRecommendations);
+        setAiRecommendations(transformedRecommendations);
+        
+        if (recommendationsData.length === 0) {
+          Alert.alert('No Recommendations', 'We couldn\'t find any friend recommendations for you right now. Try again later!');
+        }
       } else {
         console.log('❌ AI RECOMMENDATIONS - Failed to load:', response.error);
+        console.log('❌ AI RECOMMENDATIONS - Response data was:', response.data);
         setAiRecommendations([]);
+        Alert.alert('Error', response.error || 'Failed to get AI recommendations');
       }
     } catch (error) {
       console.error('❌ AI RECOMMENDATIONS - Exception:', error);
       setAiRecommendations([]);
+      Alert.alert('Error', 'An unexpected error occurred while getting recommendations');
     } finally {
       setIsLoadingAI(false);
     }
@@ -619,8 +658,8 @@ export default function FriendsScreen() {
                 <View style={styles.conversationHeader}>
                   <ThemedText style={styles.username}>
                     {conversation.chat_type === 'direct' 
-                      ? conversation.other_user?.username || 'Unknown User'
-                      : conversation.group_name || conversation.chat_name || `Group ${conversation.chat_id}`
+                      ? (conversation.other_user?.username || 'Unknown User')
+                      : (conversation.group_name || `Group ${conversation.chat_id}`)
                     }
                   </ThemedText>
                   <ThemedText style={styles.timestamp}>
@@ -745,9 +784,6 @@ export default function FriendsScreen() {
                   
                   <View style={styles.userDetails}>
                     <ThemedText style={styles.userUsername}>{user.username}</ThemedText>
-                    <ThemedText style={styles.userBio} numberOfLines={2}>
-                      {user.bio}
-                    </ThemedText>
                     <View style={styles.userInterests}>
                       {user.interests?.slice(0, 3).map((interest, index) => (
                         <View key={index} style={styles.interestTag}>
@@ -802,10 +838,111 @@ export default function FriendsScreen() {
             color={LadColors.primary} 
           />
           <ThemedText style={styles.aiSuggestText}>
-            {isLoadingAI ? 'Finding suggestions...' : 'Suggest a friend with AI'}
+            {isLoadingAI ? 'Finding suggestions...' : 'Find a Friend with AI'}
           </ThemedText>
         </View>
       </TouchableOpacity>
+
+      {/* AI Recommendations - directly below the button */}
+      {aiRecommendations.length > 0 && (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            AI Friend Suggestions
+          </ThemedText>
+          
+          {aiRecommendations.map((user) => (
+              <View key={user.id} style={styles.userCard}>
+                <View style={styles.userInfo}>
+                  <View style={styles.avatarContainer}>
+                    {user.profile_photo_url ? (
+                      <ProfilePicture
+                        uri={user.profile_photo_url}
+                        size={48}
+                        style={styles.avatar}
+                      />
+                    ) : (
+                      <View style={styles.avatar}>
+                        <IconSymbol 
+                          name="person.crop.circle" 
+                          size={40} 
+                          color={Colors[colorScheme ?? 'light'].icon} 
+                        />
+                      </View>
+                    )}
+                    {user.is_verified && (
+                      <View style={styles.verifiedBadge}>
+                        <IconSymbol name="checkmark" size={10} color="white" />
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.userDetails}>
+                    <View style={styles.userHeaderRow}>
+                    <ThemedText style={styles.userUsername}>{user.username}</ThemedText>
+                      {user.similarity_score && (
+                        <View style={styles.similarityBadge}>
+                          <IconSymbol name="sparkles" size={10} color={LadColors.primary} />
+                          <ThemedText style={styles.similarityText}>
+                            {Math.round(user.similarity_score * 100)}%
+                          </ThemedText>
+                        </View>
+                      )}
+                    </View>
+                    
+                    {user.bio && (
+                      <ThemedText style={styles.recommendationReason} numberOfLines={2}>
+                        {user.bio}
+                      </ThemedText>
+                    )}
+                    
+                    {user.mutual_friends_count && user.mutual_friends_count > 0 && (
+                      <View style={styles.mutualFriendsRow}>
+                        <IconSymbol name="person.2" size={12} color={Colors[colorScheme ?? 'light'].icon} />
+                        <ThemedText style={styles.mutualFriendsText}>
+                          {user.mutual_friends_count} mutual friend{user.mutual_friends_count !== 1 ? 's' : ''}
+                        </ThemedText>
+                      </View>
+                    )}
+                    
+                    <View style={styles.userInterests}>
+                      {user.interests?.slice(0, 3).map((interest, index) => (
+                        <View key={index} style={styles.interestTag}>
+                          <ThemedText style={styles.interestText}>{interest}</ThemedText>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.userActions}>
+                  {user.friendship_status === 'none' && (
+                    <TouchableOpacity 
+                    style={styles.addFriendButton}
+                      onPress={() => sendFriendRequest(user.id, user.username)}
+                    >
+                      <IconSymbol name="person.badge.plus" size={16} color="white" />
+                      <ThemedText style={styles.addButtonText}>Add</ThemedText>
+                    </TouchableOpacity>
+                  )}
+                  {user.friendship_status === 'request_sent' && (
+                    <View style={styles.statusButton}>
+                      <ThemedText style={styles.statusText}>Requested</ThemedText>
+                    </View>
+                  )}
+                  {user.friendship_status === 'friends' && (
+                  <TouchableOpacity 
+                    style={styles.messageButton}
+                    onPress={() => openDirectConversation(user.id, user.username)}
+                  >
+                    <IconSymbol name="message" size={16} color="#007AFF" />
+                    <ThemedText style={styles.messageButtonText}>Message</ThemedText>
+                  </TouchableOpacity>
+                  )}
+                </View>
+          </View>
+          ))}
+        </ThemedView>
+      )}
 
       {/* Open to Friends Toggle */}
       <ThemedView style={styles.section}>
@@ -857,9 +994,6 @@ export default function FriendsScreen() {
                   
                   <View style={styles.userDetails}>
                     <ThemedText style={styles.userUsername}>{friendship.friend.username}</ThemedText>
-                    <ThemedText style={styles.userBio} numberOfLines={2}>
-                      {friendship.friend.bio}
-                    </ThemedText>
                     <View style={styles.userInterests}>
                       {friendship.friend.interests?.slice(0, 3).map((interest, index) => (
                         <View key={index} style={styles.interestTag}>
@@ -871,76 +1005,20 @@ export default function FriendsScreen() {
                 </View>
 
                 <View style={styles.userActions}>
-                  <TouchableOpacity 
-                    style={styles.messageButton}
+                    <TouchableOpacity 
+                      style={styles.messageButton}
                     onPress={(e) => {
                       e.stopPropagation(); // Prevent triggering profile view
                       openDirectConversation(friendship.friend.id, friendship.friend.username);
                     }}
-                  >
-                    <IconSymbol name="message" size={16} color="#007AFF" />
-                    <ThemedText style={styles.messageButtonText}>Message</ThemedText>
-                  </TouchableOpacity>
+                    >
+                      <IconSymbol name="message" size={16} color="#007AFF" />
+                      <ThemedText style={styles.messageButtonText}>Message</ThemedText>
+                    </TouchableOpacity>
                 </View>
               </TouchableOpacity>
-            ))}
-          </View>
-        </ThemedView>
-      )}
-
-      {/* AI Recommendations */}
-      {aiRecommendations.length > 0 && (
-        <ThemedView style={styles.section}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
-            AI Friend Suggestions
-          </ThemedText>
-          
-          {aiRecommendations.map((user) => (
-              <View key={user.user_id} style={styles.userCard}>
-                <View style={styles.userInfo}>
-                  <View style={styles.avatarContainer}>
-                    <View style={styles.avatar}>
-                      <IconSymbol 
-                        name="person.crop.circle" 
-                        size={40} 
-                        color={Colors[colorScheme ?? 'light'].icon} 
-                      />
-                    </View>
-                    {user.profile_photo_url && (
-                      <ProfilePicture
-                        uri={user.profile_photo_url}
-                        size={40}
-                        style={styles.avatar}
-                      />
-                    )}
-                  </View>
-                  
-                  <View style={styles.userDetails}>
-                    <ThemedText style={styles.userUsername}>{user.username}</ThemedText>
-                    <ThemedText style={styles.userBio} numberOfLines={2}>
-                      {user.bio}
-                    </ThemedText>
-                    <View style={styles.userInterests}>
-                      {user.interests?.slice(0, 3).map((interest, index) => (
-                        <View key={index} style={styles.interestTag}>
-                          <ThemedText style={styles.interestText}>{interest}</ThemedText>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.userActions}>
-                  <TouchableOpacity 
-                    style={styles.addFriendButton}
-                    onPress={() => sendFriendRequest(user.user_id, user.username)}
-                  >
-                    <IconSymbol name="person.badge.plus" size={16} color="white" />
-                    <ThemedText style={styles.addButtonText}>Add</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </View>
           ))}
+          </View>
         </ThemedView>
       )}
 
@@ -971,14 +1049,22 @@ export default function FriendsScreen() {
             <View key={request.id} style={styles.requestCard}>
               <View style={styles.userInfo}>
                 <View style={styles.avatarContainer}>
-                  <View style={styles.avatar}>
-                    <IconSymbol 
-                      name="person.crop.circle" 
-                      size={40} 
-                      color={Colors[colorScheme ?? 'light'].icon} 
+                  {request.sender?.profile_photo_url ? (
+                    <ProfilePicture
+                      uri={request.sender.profile_photo_url}
+                      size={48}
+                      style={styles.avatar}
                     />
-                  </View>
-                  {request.requester.is_verified && (
+                  ) : (
+                    <View style={styles.avatar}>
+                      <IconSymbol 
+                        name="person.crop.circle" 
+                        size={40} 
+                        color={Colors[colorScheme ?? 'light'].icon} 
+                      />
+                    </View>
+                  )}
+                  {request.sender?.is_verified && (
                     <View style={styles.verifiedBadge}>
                       <IconSymbol name="checkmark" size={10} color="white" />
                     </View>
@@ -986,14 +1072,16 @@ export default function FriendsScreen() {
                 </View>
                 
                 <View style={styles.userDetails}>
-                  <ThemedText style={styles.userUsername}>{request.requester.username}</ThemedText>
-                  {request.message && (
+                  <ThemedText style={styles.userUsername}>
+                    {request.sender?.username || 'Unknown User'}
+                  </ThemedText>
+                  {request.sender?.bio && (
                     <ThemedText style={styles.requestMessage} numberOfLines={2}>
-                      "{request.message}"
+                      {request.sender.bio}
                     </ThemedText>
                   )}
                   <View style={styles.userInterests}>
-                    {request.requester.interests?.slice(0, 3).map((interest, index) => (
+                    {request.sender?.interests?.slice(0, 3).map((interest, index) => (
                       <View key={index} style={styles.interestTag}>
                         <ThemedText style={styles.interestText}>{interest}</ThemedText>
                       </View>
@@ -1005,14 +1093,14 @@ export default function FriendsScreen() {
               <View style={styles.requestActions}>
                 <TouchableOpacity 
                   style={styles.acceptButton}
-                  onPress={() => respondToRequest(request.id, 'accept', request.requester.username)}
+                  onPress={() => respondToRequest(request.id, 'accept', request.sender?.username || 'Unknown User')}
                 >
                   <IconSymbol name="checkmark" size={16} color="white" />
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
                   style={styles.declineButton}
-                  onPress={() => respondToRequest(request.id, 'decline', request.requester.username)}
+                  onPress={() => respondToRequest(request.id, 'decline', request.sender?.username || 'Unknown User')}
                 >
                   <IconSymbol name="xmark" size={16} color="white" />
                 </TouchableOpacity>
@@ -1047,7 +1135,7 @@ export default function FriendsScreen() {
           <IconSymbol 
             name="message.fill" 
             size={16} 
-              color={activeTab === 'chats' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
+            color={activeTab === 'chats' ? LadColors.primary : getLadColor(colorScheme ?? 'light', 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
@@ -1064,7 +1152,7 @@ export default function FriendsScreen() {
           <IconSymbol 
             name="person.2.fill" 
             size={16} 
-              color={activeTab === 'discover' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
+            color={activeTab === 'discover' ? LadColors.primary : getLadColor(colorScheme ?? 'light', 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
@@ -1081,13 +1169,13 @@ export default function FriendsScreen() {
           <IconSymbol 
               name="person.badge.plus" 
             size={16} 
-              color={activeTab === 'requests' ? LadColors.primary : getLadColor(colorScheme, 'text', 'secondary')} 
+              color={activeTab === 'requests' ? LadColors.primary : getLadColor(colorScheme ?? 'light', 'text', 'secondary')} 
           />
           <ThemedText style={[
             styles.tabText,
             activeTab === 'requests' && styles.activeTabText
           ]}>
-              Requests ({friendRequests.length})
+            Friend Requests
           </ThemedText>
         </TouchableOpacity>
         </View>
@@ -1519,12 +1607,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 4,
   },
-  userBio: {
-    fontSize: 14,
-    opacity: 0.7,
-    marginBottom: 6,
-    lineHeight: 18,
-  },
   userInterests: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1680,5 +1762,47 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  // AI Recommendations styles
+  similarityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${LadColors.primary}20`,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    gap: 3,
+  },
+  similarityText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: LadColors.primary,
+  },
+  recommendationReason: {
+    fontSize: 13,
+    opacity: 0.8,
+    fontStyle: 'italic',
+    marginBottom: 6,
+    lineHeight: 16,
+  },
+  mutualFriendsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+  },
+  mutualFriendsText: {
+    fontSize: 12,
+    opacity: 0.7,
+    fontWeight: '500',
+  },
+
+  // AI Recommendations Enhanced Styles
+  userHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
 }); 

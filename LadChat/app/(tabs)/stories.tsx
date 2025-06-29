@@ -259,25 +259,7 @@ export default function StoriesScreen() {
           )}
         </ThemedView>
 
-        {/* Circles Section */}
-        <ThemedView style={styles.section}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Your Circles
-          </ThemedText>
-          <TouchableOpacity style={styles.createCircleCard}>
-            <IconSymbol 
-              name="person.2.circle" 
-              size={24} 
-              color={Colors[colorScheme ?? 'light'].tint} 
-            />
-            <ThemedText style={styles.createCircleText}>
-              Create a Circle
-            </ThemedText>
-            <ThemedText style={styles.createCircleSubtext}>
-              Share stories with specific groups of friends
-            </ThemedText>
-          </TouchableOpacity>
-        </ThemedView>
+
       </ScrollView>
 
       {/* Story Viewer Modal */}
@@ -386,23 +368,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
     lineHeight: 20,
   },
-  createCircleCard: {
-    alignItems: 'center',
-    padding: 20,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.02)',
-  },
-  createCircleText: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  createCircleSubtext: {
-    textAlign: 'center',
-    opacity: 0.6,
-    fontSize: 14,
-  },
+
   myStoryItem: {
     alignItems: 'center',
     marginRight: 12,

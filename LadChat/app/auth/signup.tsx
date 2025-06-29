@@ -4,7 +4,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
+import { Colors, LadColors } from '@/constants/Colors';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -153,12 +153,13 @@ export default function SignupScreen() {
             </TouchableOpacity>
             
             <View style={styles.headerContent}>
+              <ThemedText style={styles.brandTitle}>LadChat</ThemedText>
               <ThemedText style={styles.title}>
-                {currentStep === 1 ? 'Join LadChat' : 'Tell Us About You'}
+                {currentStep === 1 ? 'Join the Crew' : 'Tell Us About You'}
               </ThemedText>
               <ThemedText style={styles.subtitle}>
                 {currentStep === 1 
-                  ? 'Create your account to start connecting' 
+                  ? 'Build genuine friendships and authentic connections' 
                   : 'Pick up to 3 interests to help us find your tribe'
                 }
               </ThemedText>
@@ -172,7 +173,7 @@ export default function SignupScreen() {
                     styles.progressFill, 
                     { 
                       width: `${(currentStep / 2) * 100}%`,
-                      backgroundColor: Colors[colorScheme ?? 'light'].tint 
+                      backgroundColor: LadColors.primary 
                     }
                   ]} 
                 />
@@ -197,7 +198,7 @@ export default function SignupScreen() {
                     value={formData.username}
                     onChangeText={(value) => handleInputChange('username', value)}
                     placeholder="Choose a username"
-                    placeholderTextColor={Colors[colorScheme ?? 'light'].icon}
+                    placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
@@ -217,7 +218,7 @@ export default function SignupScreen() {
                     value={formData.email}
                     onChangeText={(value) => handleInputChange('email', value)}
                     placeholder="Enter your email"
-                    placeholderTextColor={Colors[colorScheme ?? 'light'].icon}
+                    placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="email-address"
@@ -238,7 +239,7 @@ export default function SignupScreen() {
                     value={formData.password}
                     onChangeText={(value) => handleInputChange('password', value)}
                     placeholder="Create a password"
-                    placeholderTextColor={Colors[colorScheme ?? 'light'].icon}
+                    placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
                     secureTextEntry={!showPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -269,7 +270,7 @@ export default function SignupScreen() {
                     value={formData.confirmPassword}
                     onChangeText={(value) => handleInputChange('confirmPassword', value)}
                     placeholder="Confirm your password"
-                    placeholderTextColor={Colors[colorScheme ?? 'light'].icon}
+                    placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
                     secureTextEntry={!showConfirmPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -300,7 +301,7 @@ export default function SignupScreen() {
                     value={formData.bio}
                     onChangeText={(value) => handleInputChange('bio', value)}
                     placeholder="Tell us about yourself"
-                    placeholderTextColor={Colors[colorScheme ?? 'light'].icon}
+                    placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
                     maxLength={100}
                     multiline
                   />
@@ -311,7 +312,7 @@ export default function SignupScreen() {
               </View>
 
               <TouchableOpacity 
-                style={[styles.nextButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+                style={[styles.nextButton, { backgroundColor: LadColors.primary }]}
                 onPress={handleNext}
               >
                 <ThemedText style={styles.nextButtonText}>Next</ThemedText>
@@ -335,7 +336,7 @@ export default function SignupScreen() {
                       style={[
                         styles.interestChip,
                         formData.interests.includes(interest) && {
-                          backgroundColor: Colors[colorScheme ?? 'light'].tint
+                          backgroundColor: LadColors.primary
                         }
                       ]}
                       onPress={() => toggleInterest(interest)}
@@ -354,7 +355,7 @@ export default function SignupScreen() {
               <TouchableOpacity 
                 style={[
                   styles.signupButton, 
-                  { backgroundColor: Colors[colorScheme ?? 'light'].tint },
+                  { backgroundColor: LadColors.primary },
                   isLoading && styles.disabledButton
                 ]}
                 onPress={handleSignup}
@@ -373,7 +374,7 @@ export default function SignupScreen() {
             <TouchableOpacity style={styles.loginLink} onPress={handleLogin}>
               <ThemedText style={styles.loginLinkText}>
                 Already have an account?{' '}
-                <ThemedText style={[styles.loginLinkTextBold, { color: Colors[colorScheme ?? 'light'].tint }]}>
+                <ThemedText style={[styles.loginLinkTextBold, { color: LadColors.primary }]}>
                   Sign In
                 </ThemedText>
               </ThemedText>
@@ -410,8 +411,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  brandTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: LadColors.primary,
+    marginBottom: 8,
+  },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 8,
   },
